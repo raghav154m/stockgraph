@@ -109,7 +109,7 @@ def test_training_end_to_end(dataset_dir):
     from ml.models.stgnn.train import train
     from ml.pipeline import run
 
-    run(dataset_dir, train_days=120, verbose=False)
+    run(dataset_dir, verbose=False)  # same baseline settings as train() uses, so the scores are comparable
     report = train(dataset_dir, epochs=2, patience=2, hidden=16, holdouts=2, verbose=False)
     out = dataset_dir / "results"
 
