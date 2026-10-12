@@ -100,7 +100,7 @@ def test_model_is_scored_against_naive(results):
     data, summary = results
     metrics = pd.read_csv(data / "results" / "metrics.csv")
     assert set(metrics["model"]) == {"baseline", "naive"}
-    assert 0 < summary["wape_baseline"] < 1
+    assert 0 < summary["wape"]["baseline"] < 1
 
 
 def test_safety_stock_formula(results):

@@ -3,6 +3,7 @@
 *.csv
 *.parquet
 *.pt
+*.pth
 *.pkl
 *.db
 *.zip

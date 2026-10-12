@@ -9,7 +9,7 @@ reorder and transfer recommendations. Target user: a non-technical inventory man
 mid-size multi-location retailer. Solo build, 2 weeks.
 
 ## Stack
-- ML: Python 3.11+, pandas, scikit-learn HistGradientBoosting (baseline), PyTorch Geometric Temporal (ST-GNN, trained on Colab/Kaggle)
+- ML: Python 3.11+, pandas, scikit-learn HistGradientBoosting (baseline), PyTorch (ST-GNN: A3T-GCN implemented directly, dense adjacency, trains on CPU)
 - Backend: FastAPI, SQLAlchemy, SQLite, background tasks for uploads
 - Frontend: React + Vite + TypeScript, Tailwind, shadcn/ui, Recharts, Leaflet
 - Hosting: Vercel (frontend), Render or Railway (backend)
@@ -19,7 +19,8 @@ mid-size multi-location retailer. Solo build, 2 weeks.
 ml/data/       raw Favorita -> template CSVs (prepare.py), Telangana places, product catalogue, inventory simulation
 ml/graph/      store graph (nodes.csv, edges.csv)
 ml/data/load.py   loads any template dataset into a complete daily panel (fills closed days)
-ml/models/     baseline.py: direct 28-day gradient-boosted model + seasonal naive; ST-GNN (day 5+)
+ml/models/     baseline.py: direct 28-day gradient-boosted model + seasonal naive
+ml/models/stgnn/  data.py (numpy windows, adjacency), model.py (T-GCN cell + attention + decoder), train.py
 ml/inventory/  optimizer.py: lead times, safety stock, reorder points, status, transfers, reorders
 ml/pipeline.py   one command: backtest -> forecast -> optimize -> data/processed/results/
 backend/       FastAPI app (day 8+)
@@ -47,7 +48,10 @@ IDs: stores `ST-01`..`ST-54`, warehouses `WH-SHM`, `WH-MDC`, `WH-WGL`, products 
   status (stockout_risk / reorder_due / overstock / healthy)
 - recommendations.csv: rec_id, type (transfer / reorder), product_id, from_location (store, warehouse or SUPPLIER),
   to_location, quantity, deadline, priority (high / medium / low), value_inr, reason
-- summary.json: headline numbers for the dashboard
+- forecasts_stgnn.csv: same columns as forecasts.csv, model = stgnn (from ml.models.stgnn.train)
+- backtest.csv gains a `stgnn` column and metrics.csv `stgnn` rows after ST-GNN training
+- stgnn_training.json: settings, per-epoch loss and validation WAPE, holdout WAPE per model
+- summary.json: headline numbers for the dashboard; `forecast_model` says which model drove recommendations
 
 ## Conventions
 - Small focused modules; pure functions that take/return DataFrames; CLI via `python -m ml.<pkg>.<module>`
@@ -65,4 +69,5 @@ IDs: stores `ST-01`..`ST-54`, warehouses `WH-SHM`, `WH-MDC`, `WH-WGL`, products 
 ## Status
 - [x] Day 1: data prep, relabelling, simulated inventory, store graph
 - [x] Days 3–4: baseline + inventory optimizer
-- [ ] Days 5–7: ST-GNN
+- [x] Days 5–7: ST-GNN (verify on real data)
+- [ ] Days 8–11: backend + frontend
