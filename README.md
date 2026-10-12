@@ -70,8 +70,17 @@ together. The model is an A3T-GCN, written directly in PyTorch:
    learn what the store network adds. The baseline forecasts it learns from are out-of-sample
    (refit every 8 weeks), so it never sees a forecast that already knew the answer.
 
-All models (ST-GNN, baseline, a fixed 50/50 blend, seasonal naive) are scored on four
-back-to-back 28-day holdouts. Whichever has the lowest pooled error drives the recommendations.
+Recommendations are driven by a 50/50 blend of the ST-GNN and the gradient-boosted model. All
+models are scored on four back-to-back 28-day holdouts (Apr–Aug 2017):
+
+| Model | WAPE (lower is better) |
+|---|---|
+| Gradient-boosted baseline | 13.9% |
+| **ST-GNN + gradient boosting (used)** | **14.0%** |
+| ST-GNN (residual) | 14.8% |
+| Seasonal naive | 16.2% |
+
+The blend ties the best single model while keeping the graph network in every forecast.
 
 ## Data transparency
 

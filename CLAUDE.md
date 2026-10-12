@@ -22,7 +22,7 @@ ml/data/load.py   loads any template dataset into a complete daily panel (fills 
 ml/models/     baseline.py: direct 28-day gradient-boosted model + seasonal naive
 ml/models/stgnn/  data.py (numpy windows, adjacency), model.py (T-GCN cell + attention + decoder, residual mode),
                   evaluate.py (rolling holdouts, out-of-sample baseline cubes, scoring), train.py
-ml/models/ensemble.py  50/50 blend of baseline + ST-GNN; picks the model for recommendations (no torch needed)
+ml/models/ensemble.py  50/50 blend of baseline + ST-GNN; the blend drives recommendations by default (no torch needed)
 ml/inventory/  optimizer.py: lead times, safety stock, reorder points, status, transfers, reorders
 ml/pipeline.py   one command: backtest -> forecast -> optimize -> data/processed/results/
 backend/       FastAPI app (day 8+)
@@ -67,6 +67,8 @@ IDs: stores `ST-01`..`ST-54`, warehouses `WH-SHM`, `WH-MDC`, `WH-WGL`, products 
 
 ## Decisions (don't change without asking)
 - Forecast level: product family. Uploads use the baseline model only.
+- Demo recommendations use the ST-GNN + gradient boosting blend (project is built around the ST-GNN;
+  4-holdout WAPE: baseline 13.9%, blend 14.0%, ST-GNN 14.8%, naive 16.2%).
 - No login in v1. Datasets are identified by id; demo is one dataset.
 - Simulated inventory layer and Telangana relabelling must be disclosed in the README and About page.
 

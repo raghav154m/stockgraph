@@ -13,8 +13,8 @@ Steps:
   3. Rolling evaluation: for each of `holdouts` back-to-back 28-day holdouts, retrain on every
      window before it, forecast it, and score ST-GNN, baseline, 50/50 blend and naive.
   4. Final model on all data, forecasting the next 28 days.
-  5. Blend with the baseline (ml.models.ensemble) and re-run the optimizer with whichever model
-     has the lowest error pooled over all holdouts.
+  5. Blend with the baseline (ml.models.ensemble) and re-run the optimizer with the blend
+     (or another model via --model-for-recommendations; `auto` = lowest pooled error).
 
 Residual mode (default): the ST-GNN receives the baseline forecast and starts out as an exact
 copy of it, learning only corrections. `--standalone` trains it without the baseline input.
@@ -135,7 +135,7 @@ def to_frame(data: STData, pred: np.ndarray, origin: int, column: str) -> pd.Dat
 
 def train(data_dir: Path = DEFAULT_DATA, epochs: int = 40, patience: int = 6, hidden: int = 64,
           lr: float = 1e-3, batch_size: int = 32, seed: int = 42, device: str = "auto",
-          model_for_recommendations: str = "auto", holdouts: int = 4, residual: bool = True,
+          model_for_recommendations: str = "ensemble", holdouts: int = 4, residual: bool = True,
           verbose: bool = True) -> dict:
     t0 = time.time()
     out_dir = data_dir / "results"
@@ -273,7 +273,7 @@ def main() -> None:
     parser.add_argument("--holdouts", type=int, default=4, help="back-to-back 28-day holdouts to score on")
     parser.add_argument("--standalone", action="store_true", help="train without the baseline input")
     parser.add_argument("--model-for-recommendations", choices=["auto", "baseline", "stgnn", "ensemble"],
-                        default="auto", help="auto = lowest error pooled over the holdouts")
+                        default="ensemble", help="ensemble (default), stgnn, baseline, or auto = lowest pooled error")
     args = parser.parse_args()
     report = train(args.data, args.epochs, args.patience, args.hidden, args.lr, args.batch_size, args.seed,
                    args.device, args.model_for_recommendations, args.holdouts, not args.standalone)

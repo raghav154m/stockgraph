@@ -42,7 +42,7 @@ def results(tmp_path_factory):
 
 def test_blend_scores_and_forecasts(results):
     data, out = results
-    result = blend(data, verbose=False)
+    result = blend(data, model_for_recommendations="auto", verbose=False)
 
     bt = pd.read_csv(out / "backtest.csv")
     assert np.allclose(bt["ensemble"], 0.5 * bt["stgnn"] + 0.5 * bt["baseline"], atol=1e-3)  # file keeps 3 decimals
@@ -66,3 +66,10 @@ def test_blend_is_rerunnable_and_drives_recommendations(results):
     summary = json.loads((out / "summary.json").read_text())
     assert summary["forecast_model"] == "ensemble" == result["recommendation_model"]
     assert len(pd.read_csv(out / "recommendations.csv")) > 0
+
+
+def test_blend_is_the_default_for_recommendations(results):
+    data, out = results
+    result = blend(data, verbose=False)
+    assert result["recommendation_model"] == "ensemble"
+    assert json.loads((out / "summary.json").read_text())["forecast_model"] == "ensemble"

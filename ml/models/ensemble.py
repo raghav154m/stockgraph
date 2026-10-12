@@ -8,9 +8,13 @@ Reads (from results/): backtest.csv (with a `stgnn` column), metrics.csv, foreca
 forecasts_stgnn.csv. Writes: an `ensemble` column and rows, forecasts_ensemble.csv, and, when a
 model other than the baseline is chosen, recomputed recommendations and summary.json.
 
+By default the blend (ST-GNN + gradient boosting) drives recommendations: StockGraph is built around
+the ST-GNN, and over four 28-day holdouts the blend ties the best single model (13.9% vs 14.0% WAPE).
+`--model-for-recommendations auto` picks whichever model has the lowest error instead.
+
 Usage (no retraining, takes seconds):
   python -m ml.models.ensemble
-  python -m ml.models.ensemble --model-for-recommendations stgnn
+  python -m ml.models.ensemble --model-for-recommendations auto
 """
 
 from __future__ import annotations
@@ -34,7 +38,7 @@ def _forecast_file(model: str) -> str:
     return "forecasts.csv" if model == "baseline" else f"forecasts_{model}.csv"
 
 
-def blend(data_dir: Path = DEFAULT_DATA, model_for_recommendations: str = "auto", weight: float = 0.5,
+def blend(data_dir: Path = DEFAULT_DATA, model_for_recommendations: str = "ensemble", weight: float = 0.5,
           verbose: bool = True) -> dict:
     out = data_dir / "results"
     for name in ("backtest.csv", "metrics.csv", "forecasts.csv", "forecasts_stgnn.csv"):
@@ -120,7 +124,8 @@ def blend(data_dir: Path = DEFAULT_DATA, model_for_recommendations: str = "auto"
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--data", type=Path, default=DEFAULT_DATA)
-    parser.add_argument("--model-for-recommendations", choices=["auto", *MODELS], default="auto")
+    parser.add_argument("--model-for-recommendations", choices=["auto", *MODELS], default="ensemble",
+                        help="ensemble (default: ST-GNN + gradient boosting), stgnn, baseline, or auto = lowest error")
     parser.add_argument("--weight", type=float, default=0.5, help="share of the ST-GNN in the blend")
     args = parser.parse_args()
     print(json.dumps(blend(args.data, args.model_for_recommendations, args.weight), indent=2))
