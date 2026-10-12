@@ -88,8 +88,11 @@ def read_folder(data_dir: Path, history_days: int = HISTORY_DAYS) -> dict[str, p
 
     rolling_path = results / "metrics_rolling.csv"
     edges_path = data_dir / "graph" / "edges.csv"
+    locations = pd.read_csv(data_dir / "locations.csv")
+    # Warehouses have no supplier location in the template; use the same marker as inventory_status.csv.
+    locations["supplied_by"] = locations["supplied_by"].fillna("SUPPLIER")
     return {
-        "locations": pd.read_csv(data_dir / "locations.csv"),
+        "locations": locations,
         "products": pd.read_csv(data_dir / "products.csv"),
         "sales": sales,
         "forecasts": pd.concat(forecasts, ignore_index=True),

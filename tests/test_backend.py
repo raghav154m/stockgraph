@@ -119,7 +119,8 @@ def test_locations(client):
     assert set(st["status_counts"]) == {"stockout_risk", "reorder_due", "overstock", "healthy"}
     assert sum(st["status_counts"].values()) > 0
     assert st["worst_status"] in st["status_counts"]
-    assert len(client.get("/api/datasets/demo/locations", params={"type": "warehouse"}).json()) == 3
+    warehouses = client.get("/api/datasets/demo/locations", params={"type": "warehouse"}).json()
+    assert len(warehouses) == 3 and all(w["supplied_by"] == "SUPPLIER" for w in warehouses)
     assert client.get("/api/datasets/demo/locations", params={"type": "shop"}).status_code == 422
 
     detail = client.get("/api/datasets/demo/locations/ST-01").json()
