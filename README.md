@@ -51,6 +51,8 @@ an 80% band, backtest; `location_id=ALL` for the whole network), `recommendation
 
 ## Run the dashboard
 
+Needs Node 20.19+ or 22.12+ (`.nvmrc` pins 22).
+
 ```bash
 cd frontend
 npm install
