@@ -10,7 +10,7 @@
 - [x] Days 3–4: baseline model and inventory optimizer
 - [x] Days 5–7: ST-GNN
 - [x] Day 8: FastAPI backend (read API over SQLite)
-- [ ] Days 9–11: React dashboard
+- [x] Days 9–11: React dashboard
 - [ ] Days 12–13: upload flow and deployment
 - [ ] Day 14: polish, screenshots, demo video
 
@@ -48,6 +48,28 @@ The server also loads the demo on startup if the database doesn't have it yet. E
 `/api/datasets/demo/...`): overview, `locations` (with stock-status counts for the map), `products`,
 `inventory`, `forecast?location_id=ST-01&product_id=grocery-i` (history, 28-day forecast per model with
 an 80% band, backtest; `location_id=ALL` for the whole network), `recommendations`, `metrics`, `graph`.
+
+## Run the dashboard
+
+```bash
+cd frontend
+npm install
+npm run dev                         # http://localhost:5173, proxies /api to the API on port 8000
+```
+
+Start the API first (above). No Kaggle data yet? Build a small fake demo instead and point the API at it:
+
+```bash
+python scripts/fake_demo.py         # about 30 seconds, writes data/fake/
+STOCKGRAPH_DATA_DIR=data/fake/processed STOCKGRAPH_DB_URL=sqlite:///data/fake/stockgraph.db \
+  uvicorn backend.main:app --reload
+```
+
+Pages: **Overview** (what needs stock and the most urgent actions), **Map** (stores and warehouses by stock
+status), **Recommendations** (transfers and orders with filters), **Forecasts** (history, 28-day forecast with an
+80% range, and how it did on the last 28 days, per store and product), **Model accuracy**, and **About the data**
+(the data disclosure). For a production build set `VITE_API_URL` to the deployed API (see `frontend/.env.example`)
+and run `npm run build`.
 
 Step 4 writes `data/processed/results/`: 28-day forecasts with uncertainty bands, a backtest against a
 seasonal-naive benchmark, stock status per store and warehouse, and prioritised reorder and transfer
