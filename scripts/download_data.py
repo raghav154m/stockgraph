@@ -3,7 +3,9 @@
 Before running:
   1. Join the competition and accept its rules:
      https://www.kaggle.com/competitions/store-sales-time-series-forecasting
-  2. Put your API token at ~/.kaggle/kaggle.json
+  2. On kaggle.com go to Settings -> API -> Generate New Token, then save the token:
+       mkdir -p ~/.kaggle && pbpaste > ~/.kaggle/access_token && chmod 600 ~/.kaggle/access_token
+     (or set KAGGLE_API_TOKEN; a legacy ~/.kaggle/kaggle.json also works)
 
 Usage:
   python scripts/download_data.py
@@ -38,7 +40,8 @@ def main() -> int:
         api.authenticate()
     except Exception as exc:  # noqa: BLE001 - show a clear message for any auth failure
         print(f"Kaggle authentication failed: {exc}")
-        print("Create a token at kaggle.com -> Settings -> API and save it to ~/.kaggle/kaggle.json")
+        print("Generate a token at kaggle.com -> Settings -> API -> Generate New Token,")
+        print("save it to ~/.kaggle/access_token, and make sure kaggle>=1.8 is installed.")
         return 1
 
     print(f"Downloading {COMPETITION} to {RAW_DIR} ...")
