@@ -1,7 +1,7 @@
 # Day 1: data preparation and graph building
 pandas>=2.1
 numpy>=1.26
-kaggle>=1.6
+kaggle>=1.8
 
 # Dev
 pytest>=8.0

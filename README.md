@@ -16,8 +16,8 @@
 ## Quick start (data pipeline)
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate          # Windows: .venv\Scripts\activate
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 
 # 1. Download Favorita from Kaggle (needs a Kaggle API token, see below)
@@ -38,8 +38,11 @@ Outputs land in `data/processed/` in the same four-file format users upload:
 1. Create a free account at kaggle.com and open the
    [Store Sales – Time Series Forecasting](https://www.kaggle.com/competitions/store-sales-time-series-forecasting) competition.
 2. Click **Join Competition** and accept the rules (required before downloading).
-3. Go to **Settings → API → Create New Token**. Save `kaggle.json` to `~/.kaggle/kaggle.json`
-   (Windows: `C:\Users\<you>\.kaggle\kaggle.json`).
+3. Go to **Settings → API → Generate New Token**, copy the token, and save it:
+   ```bash
+   mkdir -p ~/.kaggle && pbpaste > ~/.kaggle/access_token && chmod 600 ~/.kaggle/access_token
+   ```
+   (Requires `kaggle>=1.8`. A legacy `~/.kaggle/kaggle.json` also works.)
 
 The raw data is not committed to this repo: it is large and Kaggle's terms don't allow redistribution.
 
