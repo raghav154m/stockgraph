@@ -114,19 +114,11 @@ def _model(seed: int, categorical: list[str]) -> HistGradientBoostingRegressor:
     )
 
 
-def fit_predict(sales: pd.DataFrame, calendar: pd.DataFrame, cutoff: pd.Timestamp,
-                train_days: int = 400, draws: int = 2, seed: int = 42) -> pd.DataFrame:
-    """Train on data up to `cutoff`, forecast the next 28 days. Returns KEYS, date, p50.
-
-    `draws` = how many random days-ahead values each training (series, day) gets.
-    """
+def _fit(panel: Panel, last: int, train_days: int, draws: int, seed: int):
+    """Train on (series, day) rows with target day in (last - train_days, last]. Returns (model, features used)."""
     rng = np.random.default_rng(seed)
-    history = sales[sales["date"] <= cutoff]
-    panel = Panel(history, calendar, extra_days=HORIZON)
-    n_series, last = len(panel.series), len(panel.dates) - HORIZON - 1  # last = cutoff index
-
     first = max(last - train_days + 1, 28)
-    s_idx, t_idx = np.meshgrid(np.arange(n_series), np.arange(first, last + 1), indexing="ij")
+    s_idx, t_idx = np.meshgrid(np.arange(len(panel.series)), np.arange(first, last + 1), indexing="ij")
     s_idx, t_idx = np.tile(s_idx.ravel(), draws), np.tile(t_idx.ravel(), draws)
     k_idx = rng.integers(1, HORIZON + 1, size=len(s_idx))
     keep = panel.closed[t_idx] == 0  # closed days teach nothing about demand
@@ -135,14 +127,61 @@ def fit_predict(sales: pd.DataFrame, calendar: pd.DataFrame, cutoff: pd.Timestam
 
     used = [c for c in train_x.columns if train_x[c].nunique(dropna=True) > 1]
     model = _model(seed, [c for c in CATEGORICAL if c in used]).fit(train_x[used], train_y)
+    return model, used
 
+
+def _predict(panel: Panel, model, used: list[str], origins: np.ndarray) -> np.ndarray:
+    """Forecasts for each origin (index of the last known day): [len(origins), n_series, HORIZON]."""
+    n = len(panel.series)
     k = np.arange(1, HORIZON + 1)
-    s_f, k_f = np.repeat(np.arange(n_series), HORIZON), np.tile(k, n_series)
-    pred_x = panel.features(s_f, last + k_f, k_f)
-    out = panel.series.iloc[s_f].reset_index(drop=True)
-    out["date"] = panel.dates[last + k_f]
-    out["p50"] = np.clip(model.predict(pred_x[used]), 0, None)
+    o_f = np.repeat(origins, n * HORIZON)
+    s_f = np.tile(np.repeat(np.arange(n), HORIZON), len(origins))
+    k_f = np.tile(k, n * len(origins))
+    pred = model.predict(panel.features(s_f, o_f + k_f, k_f)[used])
+    return np.clip(pred, 0, None).reshape(len(origins), n, HORIZON)
+
+
+def fit_predict(sales: pd.DataFrame, calendar: pd.DataFrame, cutoff: pd.Timestamp,
+                train_days: int = 400, draws: int = 2, seed: int = 42) -> pd.DataFrame:
+    """Train on data up to `cutoff`, forecast the next 28 days. Returns KEYS, date, p50.
+
+    `draws` = how many random days-ahead values each training (series, day) gets.
+    """
+    history = sales[sales["date"] <= cutoff]
+    panel = Panel(history, calendar, extra_days=HORIZON)
+    last = len(panel.dates) - HORIZON - 1  # cutoff index
+    model, used = _fit(panel, last, train_days, draws, seed)
+    pred = _predict(panel, model, used, np.array([last]))[0]          # [n_series, HORIZON]
+
+    n = len(panel.series)
+    out = panel.series.iloc[np.repeat(np.arange(n), HORIZON)].reset_index(drop=True)
+    out["date"] = np.tile(panel.dates[last + 1: last + 1 + HORIZON], n)
+    out["p50"] = pred.ravel()
     return out
+
+
+def rolling_forecasts(sales: pd.DataFrame, calendar: pd.DataFrame, boundaries: list[int],
+                      train_days: int = 400, draws: int = 2, seed: int = 42,
+                      log=lambda msg: None) -> tuple[np.ndarray, np.ndarray, pd.DataFrame, pd.DatetimeIndex]:
+    """Out-of-sample baseline forecasts for every origin from boundaries[0] to boundaries[-1].
+
+    The model is refit at each boundary (day index, 0 = first sales date) and forecasts every
+    origin up to the next boundary. Each forecast only uses a model trained on targets on or
+    before its own origin, so nothing it predicts was seen in training.
+
+    Returns (origins, forecasts [n_origins, n_series, HORIZON], series keys, panel dates).
+    """
+    panel = Panel(sales, calendar, extra_days=HORIZON)
+    bounds = sorted(set(boundaries))
+    origins, preds = [], []
+    for i, b in enumerate(bounds):
+        nxt = bounds[i + 1] if i + 1 < len(bounds) else b + 1
+        block = np.arange(b, nxt)
+        log(f"  baseline refit {i + 1}/{len(bounds)} at {panel.dates[b]:%Y-%m-%d}, forecasting {len(block)} origin(s)")
+        model, used = _fit(panel, b, train_days, draws, seed)
+        origins.append(block)
+        preds.append(_predict(panel, model, used, block))
+    return np.concatenate(origins), np.concatenate(preds), panel.series, panel.dates
 
 
 def seasonal_naive(sales: pd.DataFrame, cutoff: pd.Timestamp) -> pd.DataFrame:

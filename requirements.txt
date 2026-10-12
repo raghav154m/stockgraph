@@ -3,10 +3,10 @@ pandas>=2.1
 numpy>=1.26
 kaggle>=1.8
 scikit-learn>=1.4
+torch>=2.2          # ST-GNN (trains on CPU in minutes)
 
 # Dev
 pytest>=8.0
 
 # Added later in the build:
-# torch, torch-geometric, torch-geometric-temporal   (day 5, ST-GNN; install on Colab/Kaggle)
 # fastapi, uvicorn, sqlalchemy, python-multipart     (day 8, backend)

@@ -8,7 +8,7 @@
 
 - [x] Day 1: data preparation, Telangana relabelling, simulated inventory layer, store graph
 - [x] Days 3–4: baseline model and inventory optimizer
-- [ ] Days 5–7: ST-GNN
+- [x] Days 5–7: ST-GNN
 - [ ] Days 8–11: FastAPI backend and React dashboard
 - [ ] Days 12–13: upload flow and deployment
 - [ ] Day 14: polish, screenshots, demo video
@@ -31,6 +31,9 @@ python -m ml.graph.build
 
 # 4. Forecast, optimize inventory, write recommendations (about 1–3 minutes)
 python -m ml.pipeline
+
+# 5. Train the ST-GNN, blend it with the baseline, use the most accurate for recommendations
+python -m ml.models.stgnn.train
 ```
 
 Step 4 writes `data/processed/results/`: 28-day forecasts with uncertainty bands, a backtest against a
@@ -53,6 +56,32 @@ Outputs land in `data/processed/` in the same four-file format users upload:
 
 The raw data is not committed to this repo: it is large and Kaggle's terms don't allow redistribution.
 
+## How the ST-GNN works
+
+Each store is a node in a graph; edges link stores in the same city and stores whose sales move
+together. The model is an A3T-GCN, written directly in PyTorch:
+
+1. **Encoder:** a graph-convolutional GRU reads the last 56 days. Each day, every store updates its
+   state from its own sales, the calendar, and its neighbours' states.
+2. **Attention** over those 56 days picks out the ones that matter most.
+3. **Decoder:** for each of the next 28 days, it starts from the gradient-boosted baseline's
+   forecast and learns a correction from the store's state, last year's sales, the known calendar
+   and the network context. Untrained, it reproduces the baseline exactly; training only has to
+   learn what the store network adds. The baseline forecasts it learns from are out-of-sample
+   (refit every 8 weeks), so it never sees a forecast that already knew the answer.
+
+Recommendations are driven by a 50/50 blend of the ST-GNN and the gradient-boosted model. All
+models are scored on four back-to-back 28-day holdouts (Apr–Aug 2017):
+
+| Model | WAPE (lower is better) |
+|---|---|
+| Gradient-boosted baseline | 13.9% |
+| **ST-GNN + gradient boosting (used)** | **14.0%** |
+| ST-GNN (residual) | 14.8% |
+| Seasonal naive | 16.2% |
+
+The blend ties the best single model while keeping the graph network in every forecast.
+
 ## Data transparency
 
 Demo data is adapted from the Favorita grocery sales dataset (Corporación Favorita, Ecuador). Store
@@ -61,4 +90,4 @@ simulated. Sales patterns, including holidays, come from the original Ecuadorian
 
 ## Tech stack
 
-Python · pandas · scikit-learn · PyTorch Geometric Temporal · FastAPI · SQLite · React · Vite · TypeScript · Tailwind · shadcn/ui · Recharts · Leaflet
+Python · pandas · scikit-learn · PyTorch · PyTorch Geometric Temporal · FastAPI · SQLite · React · Vite · TypeScript · Tailwind · shadcn/ui · Recharts · Leaflet
