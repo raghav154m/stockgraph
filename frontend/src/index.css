@@ -218,6 +218,20 @@
   }
 }
 
+/* Map tiles: OpenStreetMap's colourful style, quietened so the status colours carry the map.
+   Dark mode inverts the tiles rather than loading a second (keyed) tile service. */
+.sg-tiles {
+  filter: grayscale(0.85) contrast(0.92) brightness(1.04);
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) .sg-tiles {
+    filter: grayscale(1) invert(1) brightness(0.82) contrast(0.85);
+  }
+}
+:root[data-theme="dark"] .sg-tiles {
+  filter: grayscale(1) invert(1) brightness(0.82) contrast(0.85);
+}
+
 /* Leaflet sits inside the themed page */
 .leaflet-container {
   font-family: var(--font-sans);

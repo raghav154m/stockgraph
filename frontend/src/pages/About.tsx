@@ -123,7 +123,7 @@ export function AboutPage() {
         </h2>
         <p className="mt-4">
           Python, pandas, scikit-learn and PyTorch for the models; FastAPI and SQLite for the API; React, TypeScript,
-          Tailwind, shadcn/ui, Recharts and Leaflet for this dashboard. Map tiles by CARTO from OpenStreetMap data.
+          Tailwind, shadcn/ui, Recharts and Leaflet for this dashboard. Map tiles from OpenStreetMap.
         </p>
         <p className="mt-3">
           Sales data: Corporación Favorita, from Kaggle’s{' '}

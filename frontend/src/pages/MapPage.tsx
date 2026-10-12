@@ -7,7 +7,6 @@ import { PageHeader } from '@/components/PageHeader'
 import { ErrorState, LoadingBlock } from '@/components/States'
 import { StatusBadge } from '@/components/StatusBadge'
 import { StatusTape } from '@/components/StatusTape'
-import { useResolvedTheme } from '@/lib/theme'
 import { Button } from '@/components/ui/button'
 import { useLocation as useLocationDetail, useLocations } from '@/hooks/queries'
 import type { MapLocation, Status, StatusCounts } from '@/lib/api'
@@ -15,12 +14,20 @@ import { formatDays, formatUnits } from '@/lib/format'
 import { STATUS, STATUS_ORDER } from '@/lib/status'
 import { cn } from '@/lib/utils'
 
-const TILES = {
-  light: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
-  dark: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+// OpenStreetMap's standard tiles: free, no API key; attribution required. Styled for light/dark in index.css.
+const TILE_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png'
+const ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+
+/** Products that need stock now (stockout risk + reorder due), or the filtered status's count. */
+function markerCount(loc: MapLocation, filter: Status | null) {
+  return filter ? loc.status_counts[filter] : loc.status_counts.stockout_risk + loc.status_counts.reorder_due
 }
-const ATTRIBUTION =
-  '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+
+/** Area grows with the count, so a store with 4 problems doesn't look 4x as big as one with 1. */
+function markerRadius(count: number, max: number) {
+  if (max <= 0) return 6
+  return 5 + 9 * Math.sqrt(count / max)
+}
 
 const isStatus = (v: string | null): v is Status => !!v && (STATUS_ORDER as string[]).includes(v)
 
@@ -52,7 +59,6 @@ function FitBounds({ locations }: { locations: MapLocation[] }) {
 
 export default function MapPage() {
   const locations = useLocations()
-  const theme = useResolvedTheme()
   const [params, setParams] = useSearchParams()
   const filter = isStatus(params.get('status')) ? (params.get('status') as Status) : null
   const selectedId = params.get('location')
@@ -83,6 +89,8 @@ export default function MapPage() {
     (a, b) => STATUS_ORDER.indexOf(b.worst_status) - STATUS_ORDER.indexOf(a.worst_status),
   )
 
+  const maxCount = Math.max(0, ...stores.map((s) => markerCount(s, filter)))
+
   const matching = filter ? stores.filter((s) => s.status_counts[filter] > 0).length : stores.length
 
   return (
@@ -95,7 +103,7 @@ export default function MapPage() {
           </Button>
         }
       >
-        Each dot is a store, coloured by its most urgent stock problem. Squares are warehouses.
+        Each dot is a store, coloured by its most urgent stock problem and sized by how many products need stock there. Squares are warehouses.
       </PageHeader>
 
       {locations.isError ? (
@@ -126,7 +134,7 @@ export default function MapPage() {
           <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
             <div className="h-[60vh] min-h-[380px] overflow-hidden rounded-lg border lg:h-[640px]">
               <MapContainer center={[17.9, 79.0]} zoom={7} scrollWheelZoom className="h-full w-full">
-                <TileLayer key={theme} url={TILES[theme]} attribution={ATTRIBUTION} subdomains="abcd" maxZoom={19} />
+                <TileLayer url={TILE_URL} attribution={ATTRIBUTION} maxZoom={19} className="sg-tiles" />
                 <FitBounds locations={data} />
                 {showLinks &&
                   stores.map((s) => {
@@ -146,11 +154,12 @@ export default function MapPage() {
                 {drawOrder.map((s) => {
                   const st = markerStatus(s, filter)
                   const selected = s.location_id === selectedId
+                  const count = markerCount(s, filter)
                   return (
                     <CircleMarker
                       key={s.location_id}
                       center={[s.latitude, s.longitude]}
-                      radius={selected ? 10 : 7}
+                      radius={markerRadius(count, maxCount) + (selected ? 2 : 0)}
                       pathOptions={{
                         color: selected ? 'var(--foreground)' : 'var(--card)',
                         weight: selected ? 3 : 2,
@@ -163,8 +172,9 @@ export default function MapPage() {
                       <Tooltip direction="top" offset={[0, -6]}>
                         <span className="font-medium">{s.name}</span>
                         <br />
-                        {STATUS[s.worst_status].label}
-                        {s.high_priority_recommendations > 0 && `, ${s.high_priority_recommendations} urgent`}
+                        {filter
+                          ? `${count} ${count === 1 ? 'product' : 'products'} with ${STATUS[filter].label.toLowerCase()}`
+                          : `${count} ${count === 1 ? 'product needs' : 'products need'} stock`}
                       </Tooltip>
                     </CircleMarker>
                   )
