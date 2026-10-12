@@ -105,6 +105,8 @@ def windows(data: STData, origins: np.ndarray, scale: np.ndarray) -> dict[str, n
     x_sales   [B, LOOKBACK, N, F]   past sales / scale
     x_cal     [B, LOOKBACK, C]      past calendar
     f_cal     [B, HORIZON, C]       calendar of the days being forecast (known in advance)
+    f_ly      [B, HORIZON, N, F]    sales on the same weekday one year (364 days) earlier / scale
+    f_ly_ok   [B, HORIZON, 1]       1 where last year's value exists, 0 where it is before the data
     y         [B, HORIZON, N, F]    future sales / scale (zeros beyond the data)
     """
     past = origins[:, None] + np.arange(-LOOKBACK + 1, 1)[None, :]
@@ -112,10 +114,14 @@ def windows(data: STData, origins: np.ndarray, scale: np.ndarray) -> dict[str, n
     if past.min() < 0 or future.max() >= len(data.dates):
         raise ValueError("Origin too close to the start or end of the data")
     s = scale[None, None]
+    last_year = future - 364
+    ok = (last_year >= 0).astype(np.float32)
     return {
         "x_sales": data.sales[past] / s,
         "x_cal": data.calendar[past],
         "f_cal": data.calendar[future],
+        "f_ly": data.sales[np.clip(last_year, 0, None)] / s * ok[..., None, None],
+        "f_ly_ok": ok[..., None],
         "y": data.sales[future] / s,
     }
 

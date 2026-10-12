@@ -66,6 +66,13 @@ def test_windows_align_with_dates(stdata):
     o = val[0]
     assert np.allclose(w["y"][0] * scale, data.sales[o + 1:o + 1 + HORIZON])
     assert np.allclose(w["x_sales"][0, -1] * scale, data.sales[o])
+    # Last year's values: same weekday 364 days before each target day, zero (and flagged) if missing.
+    ok = (o + 1 + np.arange(HORIZON) - 364) >= 0
+    assert np.array_equal(w["f_ly_ok"][0, :, 0], ok.astype(np.float32))
+    if ok.any():
+        k = int(np.argmax(ok))
+        assert np.allclose(w["f_ly"][0, k] * scale, data.sales[o + 1 + k - 364])
+    assert np.all(w["f_ly"][0, ~ok] == 0)
 
 
 # ---------- model and training (need PyTorch) ----------
@@ -81,7 +88,8 @@ def test_model_shapes_and_weekday_index():
             assert gap % 7 == 0 and gap >= k
 
     model = STGNN(n_nodes=5, n_products=3, hidden=8)
-    out = model(torch.rand(2, LOOKBACK, 5, 3), torch.rand(2, LOOKBACK, 9), torch.rand(2, HORIZON, 9), torch.eye(5))
+    out = model(torch.rand(2, LOOKBACK, 5, 3), torch.rand(2, LOOKBACK, 9), torch.rand(2, HORIZON, 9),
+                torch.rand(2, HORIZON, 5, 3), torch.ones(2, HORIZON, 1), torch.eye(5))
     assert out.shape == (2, HORIZON, 5, 3)
     assert (out >= 0).all()
 

@@ -7,8 +7,9 @@ How it reads the data, per forecast:
      across the network as the days roll forward).
   2. Attention over those 56 hidden states picks out the days that matter most (A3T-GCN).
   3. Decoder: for each of the next 28 days, an MLP combines the store's attended context,
-     its final state, the known calendar of that day, a days-ahead embedding, and a
-     same-weekday "seasonal naive" estimate, and outputs all product families at once.
+     its final state, the known calendar of that day, a days-ahead embedding, a
+     same-weekday "seasonal naive" estimate and the same weekday last year, and outputs
+     all product families at once.
 
 Outputs are in each series' own scale (sales / average daily sales), always >= 0.
 
@@ -75,7 +76,7 @@ class STGNN(nn.Module):
         self.attn = nn.Sequential(nn.Linear(hidden, hidden), nn.Tanh(), nn.Linear(hidden, 1))
         self.step_emb = nn.Embedding(HORIZON, step_dim)
         self.head = nn.Sequential(
-            nn.Linear(2 * hidden + CAL_FEATURES + step_dim + n_products, head_dim),
+            nn.Linear(2 * hidden + CAL_FEATURES + step_dim + 2 * n_products + 1, head_dim),
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.Linear(head_dim, n_products),
@@ -83,8 +84,9 @@ class STGNN(nn.Module):
         self.register_buffer("weekday_idx", torch.from_numpy(same_weekday_index()), persistent=False)
 
     def forward(self, x_sales: torch.Tensor, x_cal: torch.Tensor, f_cal: torch.Tensor,
-                adj: torch.Tensor) -> torch.Tensor:
-        """x_sales [B, L, N, P], x_cal [B, L, C], f_cal [B, H, C], adj [N, N] -> [B, H, N, P]."""
+                f_ly: torch.Tensor, f_ly_ok: torch.Tensor, adj: torch.Tensor) -> torch.Tensor:
+        """x_sales [B, L, N, P], x_cal [B, L, C], f_cal [B, H, C], f_ly [B, H, N, P],
+        f_ly_ok [B, H, 1], adj [N, N] -> [B, H, N, P]."""
         b, steps, n, _ = x_sales.shape
         emb = self.node_emb.weight.unsqueeze(0).expand(b, n, -1)
         h = x_sales.new_zeros(b, n, self.hidden)
@@ -105,6 +107,8 @@ class STGNN(nn.Module):
             f_cal.unsqueeze(2).expand(b, hor, n, -1),
             self.step_emb.weight[:hor].view(1, hor, 1, -1).expand(b, hor, n, -1),
             naive,
+            f_ly,
+            f_ly_ok.unsqueeze(2).expand(b, hor, n, -1),
         ], dim=-1)
         # Start from the seasonal-naive estimate and learn a correction on top of it.
         return F.softplus(self.head(feats) + naive)

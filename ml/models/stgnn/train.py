@@ -6,8 +6,9 @@ Run the baseline pipeline first; this script adds to its results:
   python -m ml.models.stgnn.train    # ST-GNN: trains on CPU in a few minutes
 
 Steps:
-  1. Backtest: train on everything up to 28 days before the last date (early stopping on the
-     8 most recent weekly windows), forecast the held-out 28 days, score it like the baseline.
+  1. Backtest: pick the number of epochs by early stopping on the 8 most recent weekly windows
+     before the holdout, retrain on every window up to the holdout for that many epochs (as the
+     baseline does), then forecast the held-out 28 days and score it like the baseline.
   2. Final model: retrain on all data for the same number of epochs, forecast the next 28 days.
   3. If its holdout WAPE beats the baseline, re-run the optimizer with ST-GNN forecasts.
 
@@ -69,7 +70,7 @@ class Trainer:
         with torch.no_grad():
             for i in range(0, len(origins), self.batch_size):
                 b = to_tensors(windows(self.data, origins[i:i + self.batch_size], self.scale), self.device)
-                pred = self.model(b["x_sales"], b["x_cal"], b["f_cal"], self.adj) * self.scale_t
+                pred = self.model(b["x_sales"], b["x_cal"], b["f_cal"], b["f_ly"], b["f_ly_ok"], self.adj) * self.scale_t
                 out.append(pred.cpu().numpy())
         return np.concatenate(out)
 
@@ -88,7 +89,7 @@ class Trainer:
         total, count = 0.0, 0
         for i in range(0, len(order), self.batch_size):
             b = to_tensors(windows(self.data, order[i:i + self.batch_size], self.scale), self.device)
-            pred = self.model(b["x_sales"], b["x_cal"], b["f_cal"], self.adj)
+            pred = self.model(b["x_sales"], b["x_cal"], b["f_cal"], b["f_ly"], b["f_ly_ok"], self.adj)
             open_days = (1 - b["f_cal"][..., 8])[:, :, None, None]
             w = self.weight[None, None] * open_days
             loss = (w * (pred - b["y"]) ** 2).sum() / w.sum().clamp(min=1e-6)
@@ -96,7 +97,7 @@ class Trainer:
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
             self.opt.step()
-            total += float(loss) * len(b["y"])
+            total += loss.item() * len(b["y"])
             count += len(b["y"])
         return total / count
 
@@ -137,7 +138,7 @@ def train(data_dir: Path = DEFAULT_DATA, epochs: int = 40, patience: int = 6, hi
     train_o, val_o = split_origins(cutoff)
     log(f"Backtest training: {len(train_o)} windows, validating on {len(val_o)}")
     trainer = Trainer(data, scale, dev, hidden, lr, batch_size, seed)
-    history, best, best_state, best_epoch, stale = [], np.inf, None, 0, 0
+    history, best, best_state, best_epoch, stale = [], np.inf, None, 1, 0
     for ep in range(1, epochs + 1):
         loss = trainer.epoch(train_o)
         val = trainer.wape(val_o)
@@ -150,9 +151,16 @@ def train(data_dir: Path = DEFAULT_DATA, epochs: int = 40, patience: int = 6, hi
             if stale >= patience:
                 log(f"  stopping: no improvement for {patience} epochs (best epoch {best_epoch})")
                 break
-    trainer.model.load_state_dict(best_state)
+    del best_state  # only the epoch count is kept; the scored model is refit on all data below
 
-    holdout = to_frame(data, trainer.predict(np.array([cutoff]))[0], cutoff, "stgnn")
+    # Refit on every window up to the holdout so the ST-GNN sees the same recent history as the baseline.
+    bt_o = np.arange(LOOKBACK - 1, cutoff - HORIZON + 1)
+    log(f"Refitting on {len(bt_o)} windows up to the holdout for {best_epoch} epochs ...")
+    refit = Trainer(data, scale, dev, hidden, lr, batch_size, seed)
+    for _ in range(best_epoch):
+        refit.epoch(bt_o)
+
+    holdout = to_frame(data, refit.predict(np.array([cutoff]))[0], cutoff, "stgnn")
     bt = pd.read_csv(out_dir / "backtest.csv", parse_dates=["date"]).drop(columns="stgnn", errors="ignore")
     bt = bt.merge(holdout, on=KEYS + ["date"], how="left")
     closed_dates = set(data.dates[data.calendar[:, 8] == 1])
