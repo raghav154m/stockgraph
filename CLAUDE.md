@@ -25,8 +25,9 @@ ml/models/stgnn/  data.py (numpy windows, adjacency), model.py (T-GCN cell + att
 ml/models/ensemble.py  50/50 blend of baseline + ST-GNN; the blend drives recommendations by default (no torch needed)
 ml/inventory/  optimizer.py: lead times, safety stock, reorder points, status, transfers, reorders
 ml/pipeline.py   one command: backtest -> forecast -> optimize -> data/processed/results/
-backend/       FastAPI app (day 8+)
-frontend/      React app (day 8+)
+backend/       FastAPI app: models.py (SQLAlchemy tables, keyed by dataset_id), loader.py (results/ -> SQLite,
+               `python -m backend.loader`), api.py (read endpoints under /api), main.py (create_app, autoloads demo)
+frontend/      React app (day 9+)
 scripts/       one-off utilities (download_data.py)
 tests/         pytest; fake_favorita.py makes small test data
 data/          gitignored: raw/ from Kaggle, processed/ outputs
@@ -57,6 +58,10 @@ IDs: stores `ST-01`..`ST-54`, warehouses `WH-SHM`, `WH-MDC`, `WH-WGL`, products 
 - stgnn_training.json: settings, per-epoch loss and validation WAPE, rolling and latest-holdout WAPE, chosen model
 - summary.json: headline numbers for the dashboard; `forecast_model` says which model drove recommendations
 
+## Backend settings (env vars)
+STOCKGRAPH_DB_URL (default sqlite:///data/stockgraph.db), STOCKGRAPH_DATA_DIR (default data/processed),
+STOCKGRAPH_AUTOLOAD_DEMO (default 1), STOCKGRAPH_CORS_ORIGINS (default the Vite dev server).
+
 ## Conventions
 - Small focused modules; pure functions that take/return DataFrames; CLI via `python -m ml.<pkg>.<module>`
 - Deterministic: every random step takes a `seed` (default 42)
@@ -76,4 +81,5 @@ IDs: stores `ST-01`..`ST-54`, warehouses `WH-SHM`, `WH-MDC`, `WH-WGL`, products 
 - [x] Day 1: data prep, relabelling, simulated inventory, store graph
 - [x] Days 3–4: baseline + inventory optimizer
 - [x] Days 5–7: ST-GNN (verify on real data)
-- [ ] Days 8–11: backend + frontend
+- [x] Day 8: backend read API (tests/test_backend.py; needs fastapi, sqlalchemy, httpx)
+- [ ] Days 9–11: frontend

@@ -6,6 +6,8 @@
 *.pth
 *.pkl
 *.db
+*.db-wal
+*.db-shm
 *.zip
 
 # --- secrets ---

@@ -9,7 +9,8 @@
 - [x] Day 1: data preparation, Telangana relabelling, simulated inventory layer, store graph
 - [x] Days 3–4: baseline model and inventory optimizer
 - [x] Days 5–7: ST-GNN
-- [ ] Days 8–11: FastAPI backend and React dashboard
+- [x] Day 8: FastAPI backend (read API over SQLite)
+- [ ] Days 9–11: React dashboard
 - [ ] Days 12–13: upload flow and deployment
 - [ ] Day 14: polish, screenshots, demo video
 
@@ -35,6 +36,18 @@ python -m ml.pipeline
 # 5. Train the ST-GNN, blend it with the baseline, use the most accurate for recommendations
 python -m ml.models.stgnn.train
 ```
+
+## Run the API
+
+```bash
+python -m backend.loader            # load data/processed/results into data/stockgraph.db
+uvicorn backend.main:app --reload   # interactive docs at http://127.0.0.1:8000/docs
+```
+
+The server also loads the demo on startup if the database doesn't have it yet. Endpoints (all under
+`/api/datasets/demo/...`): overview, `locations` (with stock-status counts for the map), `products`,
+`inventory`, `forecast?location_id=ST-01&product_id=grocery-i` (history, 28-day forecast per model with
+an 80% band, backtest; `location_id=ALL` for the whole network), `recommendations`, `metrics`, `graph`.
 
 Step 4 writes `data/processed/results/`: 28-day forecasts with uncertainty bands, a backtest against a
 seasonal-naive benchmark, stock status per store and warehouse, and prioritised reorder and transfer
@@ -90,4 +103,4 @@ simulated. Sales patterns, including holidays, come from the original Ecuadorian
 
 ## Tech stack
 
-Python · pandas · scikit-learn · PyTorch · PyTorch Geometric Temporal · FastAPI · SQLite · React · Vite · TypeScript · Tailwind · shadcn/ui · Recharts · Leaflet
+Python · pandas · scikit-learn · PyTorch · FastAPI · SQLAlchemy · SQLite · React · Vite · TypeScript · Tailwind · shadcn/ui · Recharts · Leaflet
