@@ -27,27 +27,7 @@ from ml.data.prepare import prepare  # noqa: E402
 from ml.graph.build import build_graph  # noqa: E402
 from ml.models.ensemble import blend  # noqa: E402
 from ml.pipeline import run  # noqa: E402
-from tests.fake_favorita import write_fake_raw  # noqa: E402
-
-
-def _fake_stgnn_outputs(results) -> None:
-    """Write what `ml.models.stgnn.train` would: ST-GNN forecasts, backtest column, rolling metrics, report."""
-    fc = pd.read_csv(results / "forecasts.csv")
-    fc.assign(model="stgnn", p50=fc["p50"] * 1.05, p10=fc["p10"] * 1.05, p90=fc["p90"] * 1.05) \
-        .to_csv(results / "forecasts_stgnn.csv", index=False)
-    bt = pd.read_csv(results / "backtest.csv")
-    bt.assign(stgnn=(bt["baseline"] * 1.02).round(3)).to_csv(results / "backtest.csv", index=False)
-    metrics = pd.read_csv(results / "metrics.csv")
-    base = metrics[metrics["model"] == "baseline"]
-    pd.concat([metrics, base.assign(model="stgnn", wape=base["wape"] * 1.05)]) \
-        .to_csv(results / "metrics.csv", index=False)
-    rows = [{"holdout_start": h, "model": m, "mae": 2.0, "wape": w, "bias": 0.0}
-            for h in ("2017-06-21", "ALL")
-            for m, w in (("baseline", 0.139), ("stgnn", 0.148), ("ensemble", 0.140), ("naive", 0.162))]
-    pd.DataFrame(rows).to_csv(results / "metrics_rolling.csv", index=False)
-    (results / "stgnn_training.json").write_text(json.dumps({
-        "settings": {"mode": "residual"}, "best_epoch": 3,
-        "history": [{"epoch": 1, "loss": 0.5, "val_wape": 0.15}], "rolling_wape": {"stgnn": 0.148}}))
+from tests.fake_favorita import write_fake_raw, write_fake_stgnn_outputs  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -57,7 +37,7 @@ def data_dir(tmp_path_factory):
     prepare(base / "raw", base / "processed", days=180)
     build_graph(base / "processed")
     run(base / "processed", train_days=120, verbose=False)
-    _fake_stgnn_outputs(base / "processed" / "results")
+    write_fake_stgnn_outputs(base / "processed" / "results")
     blend(base / "processed", verbose=False)    # ensemble drives recommendations, as in the demo
     return base / "processed"
 

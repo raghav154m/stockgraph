@@ -1,0 +1,253 @@
+@import "tailwindcss";
+@import "@fontsource-variable/public-sans";
+@import "@fontsource-variable/bricolage-grotesque";
+@import "leaflet/dist/leaflet.css";
+
+/* Dark mode follows the OS unless the user picks one: <html data-theme="light|dark">. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/*
+  Palette
+  paper   #F6F7F5  page
+  sheet   #FFFFFF  raised surfaces (tables, panels)
+  ink     #1A2420  text
+  teal    #0F5C5A  the one UI accent: links, active nav, primary buttons
+  status  critical #D03B3B · warning #E09A00 · overstock #6250D6 · good #0CA30C
+  Status colours mean stock status and nothing else; each ships with an icon and a label.
+*/
+:root {
+  --radius: 0.5rem;
+
+  --background: #f6f7f5;
+  --foreground: #1a2420;
+  --card: #ffffff;
+  --card-foreground: #1a2420;
+  --popover: #ffffff;
+  --popover-foreground: #1a2420;
+  --primary: #0f5c5a;
+  --primary-foreground: #f6f7f5;
+  --secondary: #e9ece8;
+  --secondary-foreground: #1a2420;
+  --muted: #eceee9;
+  --muted-foreground: #5a6560;
+  --accent: #e3ecea;
+  --accent-foreground: #0f3d3c;
+  --destructive: #c23434;
+  --border: #dde1dc;
+  --input: #cfd5cf;
+  --ring: #0f5c5a;
+
+  /* stock status */
+  --status-stockout: #d03b3b;
+  --status-reorder: #e09a00;
+  --status-overstock: #6250d6;
+  --status-healthy: #0ca30c;
+  /* text-safe versions of the same hues for small labels on light surfaces */
+  --status-stockout-ink: #b02a2a;
+  --status-reorder-ink: #8a5d00;
+  --status-overstock-ink: #4a3aa7;
+  --status-healthy-ink: #0b6e0b;
+  --status-healthy-soft: #b9dcb5;
+
+  /* charts (dataviz reference palette, light steps) */
+  --chart-1: #2a78d6;
+  --chart-2: #eb6834;
+  --chart-3: #1baf7a;
+  --chart-4: #eda100;
+  --chart-grid: #e4e7e2;
+  --chart-axis: #6b756f;
+  --chart-band: #2a78d6;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    --background: #141a18;
+    --foreground: #e9ede9;
+    --card: #1b2220;
+    --card-foreground: #e9ede9;
+    --popover: #1b2220;
+    --popover-foreground: #e9ede9;
+    --primary: #5cc2bd;
+    --primary-foreground: #0d1716;
+    --secondary: #252e2b;
+    --secondary-foreground: #e9ede9;
+    --muted: #222a27;
+    --muted-foreground: #a3ada8;
+    --accent: #1f3533;
+    --accent-foreground: #cfeeea;
+    --destructive: #e66767;
+    --border: #2d3733;
+    --input: #3a4540;
+    --ring: #5cc2bd;
+    --status-stockout: #e05c5c;
+    --status-reorder: #fab219;
+    --status-overstock: #9085e9;
+    --status-healthy: #2dbb2d;
+    --status-stockout-ink: #f08a8a;
+    --status-reorder-ink: #f6c45a;
+    --status-overstock-ink: #b2aaf2;
+    --status-healthy-ink: #6fd36f;
+    --status-healthy-soft: #2f5a30;
+    --chart-1: #3987e5;
+    --chart-2: #d95926;
+    --chart-3: #199e70;
+    --chart-4: #c98500;
+    --chart-grid: #2a3330;
+    --chart-axis: #98a29d;
+    --chart-band: #3987e5;
+  }
+}
+
+:root[data-theme="dark"] {
+  --background: #141a18;
+  --foreground: #e9ede9;
+  --card: #1b2220;
+  --card-foreground: #e9ede9;
+  --popover: #1b2220;
+  --popover-foreground: #e9ede9;
+  --primary: #5cc2bd;
+  --primary-foreground: #0d1716;
+  --secondary: #252e2b;
+  --secondary-foreground: #e9ede9;
+  --muted: #222a27;
+  --muted-foreground: #a3ada8;
+  --accent: #1f3533;
+  --accent-foreground: #cfeeea;
+  --destructive: #e66767;
+  --border: #2d3733;
+  --input: #3a4540;
+  --ring: #5cc2bd;
+  --status-stockout: #e05c5c;
+  --status-reorder: #fab219;
+  --status-overstock: #9085e9;
+  --status-healthy: #2dbb2d;
+  --status-stockout-ink: #f08a8a;
+  --status-reorder-ink: #f6c45a;
+  --status-overstock-ink: #b2aaf2;
+  --status-healthy-ink: #6fd36f;
+  --status-healthy-soft: #2f5a30;
+  --chart-1: #3987e5;
+  --chart-2: #d95926;
+  --chart-3: #199e70;
+  --chart-4: #c98500;
+  --chart-grid: #2a3330;
+  --chart-axis: #98a29d;
+  --chart-band: #3987e5;
+}
+
+@theme inline {
+  --font-sans: "Public Sans Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Bricolage Grotesque Variable", "Public Sans Variable", ui-sans-serif, sans-serif;
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-stockout: var(--status-stockout);
+  --color-reorder: var(--status-reorder);
+  --color-overstock: var(--status-overstock);
+  --color-healthy: var(--status-healthy);
+  --color-stockout-ink: var(--status-stockout-ink);
+  --color-reorder-ink: var(--status-reorder-ink);
+  --color-overstock-ink: var(--status-overstock-ink);
+  --color-healthy-ink: var(--status-healthy-ink);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    html:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+    }
+  }
+  html[data-theme="dark"] {
+    color-scheme: dark;
+  }
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-size: 15px;
+    line-height: 1.5;
+  }
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-display);
+    letter-spacing: -0.01em;
+    line-height: 1.15;
+  }
+  /* numbers line up in tables and figures */
+  .num {
+    font-variant-numeric: tabular-nums;
+  }
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+/* Map tiles: OpenStreetMap's colourful style, quietened so the status colours carry the map.
+   Dark mode inverts the tiles rather than loading a second (keyed) tile service. */
+.sg-tiles {
+  filter: grayscale(0.85) contrast(0.92) brightness(1.04);
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) .sg-tiles {
+    filter: grayscale(1) invert(1) brightness(0.82) contrast(0.85);
+  }
+}
+:root[data-theme="dark"] .sg-tiles {
+  filter: grayscale(1) invert(1) brightness(0.82) contrast(0.85);
+}
+
+/* Leaflet sits inside the themed page */
+.leaflet-container {
+  font-family: var(--font-sans);
+  background: var(--muted);
+}
+.leaflet-tooltip {
+  background: var(--popover);
+  color: var(--popover-foreground);
+  border: 1px solid var(--border);
+  box-shadow: none;
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+.leaflet-tooltip-top::before {
+  border-top-color: var(--border);
+}
+.leaflet-control-attribution {
+  font-size: 11px;
+}

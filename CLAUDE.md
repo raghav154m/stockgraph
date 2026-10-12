@@ -27,8 +27,10 @@ ml/inventory/  optimizer.py: lead times, safety stock, reorder points, status, t
 ml/pipeline.py   one command: backtest -> forecast -> optimize -> data/processed/results/
 backend/       FastAPI app: models.py (SQLAlchemy tables, keyed by dataset_id), loader.py (results/ -> SQLite,
                `python -m backend.loader`), api.py (read endpoints under /api), main.py (create_app, autoloads demo)
-frontend/      React app (day 9+)
-scripts/       one-off utilities (download_data.py)
+frontend/      React app: src/lib/api.ts (typed client), src/pages/ (Overview, MapPage, Recommendations, Forecast,
+               Accuracy, About), src/components/ui/ (shadcn/ui, hand-added: registry unreachable from cloud sessions),
+               status colours and labels in src/lib/status.ts, theme tokens in src/index.css
+scripts/       one-off utilities (download_data.py, fake_demo.py: fake demo data for running the API/UI)
 tests/         pytest; fake_favorita.py makes small test data
 data/          gitignored: raw/ from Kaggle, processed/ outputs
 ```
@@ -82,4 +84,11 @@ STOCKGRAPH_AUTOLOAD_DEMO (default 1), STOCKGRAPH_CORS_ORIGINS (default the Vite 
 - [x] Days 3–4: baseline + inventory optimizer
 - [x] Days 5–7: ST-GNN (verify on real data)
 - [x] Day 8: backend read API (tests/test_backend.py; needs fastapi, sqlalchemy, httpx)
-- [ ] Days 9–11: frontend
+- [x] Days 9–11: frontend (dev: `npm run dev` in frontend/, proxies /api to :8000)
+
+## Frontend conventions
+- Status colours mean stock status only, always with icon + label (StatusBadge, StatusTape); models keep fixed colours
+  (MODEL_COLOR) whatever is shown
+- ₹ with Indian grouping and lakh/crore (src/lib/format.ts); plain words, sentence case; no hard-coded result numbers
+  except the 4-holdout WAPE on the About page
+- Filters live in the URL query so views can be linked; `npm run lint` and `npx tsc -b` must pass
