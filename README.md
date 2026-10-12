@@ -7,7 +7,7 @@
 ## Status
 
 - [x] Day 1: data preparation, Telangana relabelling, simulated inventory layer, store graph
-- [ ] Days 3–4: baseline model and inventory optimizer
+- [x] Days 3–4: baseline model and inventory optimizer
 - [ ] Days 5–7: ST-GNN
 - [ ] Days 8–11: FastAPI backend and React dashboard
 - [ ] Days 12–13: upload flow and deployment
@@ -28,7 +28,14 @@ python -m ml.data.prepare
 
 # 3. Build the store graph
 python -m ml.graph.build
+
+# 4. Forecast, optimize inventory, write recommendations (about 1–3 minutes)
+python -m ml.pipeline
 ```
+
+Step 4 writes `data/processed/results/`: 28-day forecasts with uncertainty bands, a backtest against a
+seasonal-naive benchmark, stock status per store and warehouse, and prioritised reorder and transfer
+recommendations with plain-language reasons.
 
 Outputs land in `data/processed/` in the same four-file format users upload:
 `locations.csv`, `products.csv`, `sales.csv`, `inventory.csv`, plus `graph/nodes.csv` and `graph/edges.csv`.
@@ -54,4 +61,4 @@ simulated. Sales patterns, including holidays, come from the original Ecuadorian
 
 ## Tech stack
 
-Python · pandas · LightGBM · PyTorch Geometric Temporal · FastAPI · SQLite · React · Vite · TypeScript · Tailwind · shadcn/ui · Recharts · Leaflet
+Python · pandas · scikit-learn · PyTorch Geometric Temporal · FastAPI · SQLite · React · Vite · TypeScript · Tailwind · shadcn/ui · Recharts · Leaflet

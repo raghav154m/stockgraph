@@ -9,7 +9,7 @@ reorder and transfer recommendations. Target user: a non-technical inventory man
 mid-size multi-location retailer. Solo build, 2 weeks.
 
 ## Stack
-- ML: Python 3.11+, pandas, LightGBM (baseline), PyTorch Geometric Temporal (ST-GNN, trained on Colab/Kaggle)
+- ML: Python 3.11+, pandas, scikit-learn HistGradientBoosting (baseline), PyTorch Geometric Temporal (ST-GNN, trained on Colab/Kaggle)
 - Backend: FastAPI, SQLAlchemy, SQLite, background tasks for uploads
 - Frontend: React + Vite + TypeScript, Tailwind, shadcn/ui, Recharts, Leaflet
 - Hosting: Vercel (frontend), Render or Railway (backend)
@@ -18,8 +18,10 @@ mid-size multi-location retailer. Solo build, 2 weeks.
 ```
 ml/data/       raw Favorita -> template CSVs (prepare.py), Telangana places, product catalogue, inventory simulation
 ml/graph/      store graph (nodes.csv, edges.csv)
-ml/models/     baseline and ST-GNN (day 3+)
-ml/inventory/  safety stock, reorder points, transfers (day 3+)
+ml/data/load.py   loads any template dataset into a complete daily panel (fills closed days)
+ml/models/     baseline.py: direct 28-day gradient-boosted model + seasonal naive; ST-GNN (day 5+)
+ml/inventory/  optimizer.py: lead times, safety stock, reorder points, status, transfers, reorders
+ml/pipeline.py   one command: backtest -> forecast -> optimize -> data/processed/results/
 backend/       FastAPI app (day 8+)
 frontend/      React app (day 8+)
 scripts/       one-off utilities (download_data.py)
@@ -36,6 +38,17 @@ Demo data and user uploads use the same four files:
 Demo extras: calendar.csv (is_holiday, oil_price, day_of_week), store_map.csv, meta.json.
 IDs: stores `ST-01`..`ST-54`, warehouses `WH-SHM`, `WH-MDC`, `WH-WGL`, products are slugs like `grocery-i`.
 
+## Results contract (written by ml.pipeline, loaded into SQLite later)
+- forecasts.csv: location_id, product_id, date, model, p50, p10, p90, sigma (28 days ahead)
+- backtest.csv: location_id, product_id, date, actual, baseline, naive (last 28 days held out)
+- metrics.csv: model, location_id (ALL or store), mae, wape, bias
+- inventory_status.csv: location_id, product_id, supplied_by, on_hand, on_order, avg_daily_forecast,
+  days_of_cover, lead_time_days, safety_stock, reorder_point, target_level,
+  status (stockout_risk / reorder_due / overstock / healthy)
+- recommendations.csv: rec_id, type (transfer / reorder), product_id, from_location (store, warehouse or SUPPLIER),
+  to_location, quantity, deadline, priority (high / medium / low), value_inr, reason
+- summary.json: headline numbers for the dashboard
+
 ## Conventions
 - Small focused modules; pure functions that take/return DataFrames; CLI via `python -m ml.<pkg>.<module>`
 - Deterministic: every random step takes a `seed` (default 42)
@@ -51,4 +64,5 @@ IDs: stores `ST-01`..`ST-54`, warehouses `WH-SHM`, `WH-MDC`, `WH-WGL`, products 
 
 ## Status
 - [x] Day 1: data prep, relabelling, simulated inventory, store graph
-- [ ] Days 3–4: baseline + inventory optimizer
+- [x] Days 3–4: baseline + inventory optimizer
+- [ ] Days 5–7: ST-GNN
