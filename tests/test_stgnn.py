@@ -103,7 +103,8 @@ def test_training_end_to_end(dataset_dir):
     report = train(dataset_dir, epochs=2, patience=2, hidden=16, verbose=False)
     out = dataset_dir / "results"
 
-    assert {"stgnn", "baseline", "naive"} <= set(report["holdout_wape"])
+    assert {"stgnn", "baseline", "naive", "ensemble"} <= set(report["holdout_wape"])
+    assert report["recommendation_model"] in {"baseline", "stgnn", "ensemble"}
     assert 0 < report["holdout_wape"]["stgnn"] < 2
     fc = pd.read_csv(out / "forecasts_stgnn.csv")
     assert fc["date"].nunique() == HORIZON and (fc["p10"] <= fc["p50"] + 1e-9).all()

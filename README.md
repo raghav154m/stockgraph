@@ -32,7 +32,7 @@ python -m ml.graph.build
 # 4. Forecast, optimize inventory, write recommendations (about 1–3 minutes)
 python -m ml.pipeline
 
-# 5. Train the ST-GNN, compare with the baseline, use it if it wins (a few minutes on CPU)
+# 5. Train the ST-GNN, blend it with the baseline, use the most accurate for recommendations
 python -m ml.models.stgnn.train
 ```
 
@@ -68,7 +68,8 @@ together. The model is an A3T-GCN, written directly in PyTorch:
    correction from the store's state, the known calendar and the network context.
 
 It is scored on the same 28-day holdout as a gradient-boosted baseline and a seasonal-naive
-benchmark, and only drives recommendations if it beats the baseline.
+benchmark, alongside a fixed 50/50 blend of the ST-GNN and the baseline. Whichever has the
+lowest holdout error drives the recommendations.
 
 ## Data transparency
 

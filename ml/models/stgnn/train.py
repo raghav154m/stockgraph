@@ -10,10 +10,12 @@ Steps:
      before the holdout, retrain on every window up to the holdout for that many epochs (as the
      baseline does), then forecast the held-out 28 days and score it like the baseline.
   2. Final model: retrain on all data for the same number of epochs, forecast the next 28 days.
-  3. If its holdout WAPE beats the baseline, re-run the optimizer with ST-GNN forecasts.
+  3. Blend it 50/50 with the baseline (ml.models.ensemble), score all models on the holdout,
+     and re-run the optimizer with whichever has the lowest holdout error.
 
 Adds to results/: forecasts_stgnn.csv, a `stgnn` column in backtest.csv, `stgnn` rows in
-metrics.csv, stgnn_training.json (loss curve, settings), stgnn.pt (weights, gitignored).
+metrics.csv, forecasts_ensemble.csv, stgnn_training.json (loss curve, settings, holdout
+scores, chosen model), stgnn.pt (weights, gitignored).
 """
 
 from __future__ import annotations
@@ -30,6 +32,7 @@ import torch
 
 from ml.data.load import load_dataset
 from ml.models.baseline import KEYS, Z80, error_metrics, series_sigma
+from ml.models.ensemble import blend
 from ml.models.stgnn.data import HORIZON, LOOKBACK, STData, build, split_origins, windows
 from ml.models.stgnn.model import STGNN
 
@@ -116,7 +119,7 @@ def to_frame(data: STData, pred: np.ndarray, origin: int, column: str) -> pd.Dat
 
 def train(data_dir: Path = DEFAULT_DATA, epochs: int = 40, patience: int = 6, hidden: int = 64,
           lr: float = 1e-3, batch_size: int = 32, seed: int = 42, device: str = "auto",
-          use_for_recommendations: str = "auto", verbose: bool = True) -> dict:
+          model_for_recommendations: str = "auto", verbose: bool = True) -> dict:
     t0 = time.time()
     out_dir = data_dir / "results"
     if not (out_dir / "backtest.csv").exists():
@@ -196,27 +199,17 @@ def train(data_dir: Path = DEFAULT_DATA, epochs: int = 40, patience: int = 6, hi
     metrics.to_csv(out_dir / "metrics.csv", index=False)
     torch.save(final.model.state_dict(), out_dir / "stgnn.pt")
 
-    wins = bool(wape["stgnn"] < wape["baseline"])
-    use = use_for_recommendations == "always" or (use_for_recommendations == "auto" and wins)
     report = {
         "settings": {"lookback": LOOKBACK, "horizon": HORIZON, "hidden": hidden, "lr": lr,
                      "batch_size": batch_size, "seed": seed, "max_epochs": epochs, "patience": patience},
         "best_epoch": best_epoch,
         "history": history,
-        "holdout_wape": {m: float(w) for m, w in wape.items()},
-        "beats_baseline": wins,
-        "used_for_recommendations": use,
         "train_seconds": round(time.time() - t0, 1),
     }
     (out_dir / "stgnn_training.json").write_text(json.dumps(report, indent=2))
 
-    if use:
-        from ml.pipeline import optimize  # local import: pipeline doesn't need torch
-        log("Re-running the inventory optimizer with ST-GNN forecasts ...")
-        summary = optimize(ds, fc, out_dir, metrics, "stgnn")
-        (out_dir / "summary.json").write_text(json.dumps(summary, indent=2))
-    else:
-        log("Keeping baseline forecasts for recommendations (ST-GNN did not beat it).")
+    # Blend with the baseline, score everything on the holdout, pick the model for recommendations.
+    report.update(blend(data_dir, model_for_recommendations, verbose=verbose))
     log(f"Done in {time.time() - t0:.0f}s. Results in {out_dir}")
     return report
 
@@ -231,12 +224,13 @@ def main() -> None:
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", default="auto", help="auto, cpu, cuda or mps")
-    parser.add_argument("--use-for-recommendations", choices=["auto", "always", "never"], default="auto")
+    parser.add_argument("--model-for-recommendations", choices=["auto", "baseline", "stgnn", "ensemble"],
+                        default="auto", help="auto = lowest holdout error")
     args = parser.parse_args()
     report = train(args.data, args.epochs, args.patience, args.hidden, args.lr, args.batch_size,
-                   args.seed, args.device, args.use_for_recommendations)
-    print(json.dumps({k: report[k] for k in ("best_epoch", "holdout_wape", "beats_baseline",
-                                             "used_for_recommendations", "train_seconds")}, indent=2))
+                   args.seed, args.device, args.model_for_recommendations)
+    print(json.dumps({k: report[k] for k in ("best_epoch", "holdout_wape", "best_model",
+                                             "recommendation_model", "train_seconds")}, indent=2))
 
 
 if __name__ == "__main__":
