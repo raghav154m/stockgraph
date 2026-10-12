@@ -21,8 +21,8 @@ from tests.fake_favorita import write_fake_raw
 @pytest.fixture(scope="module")
 def dataset_dir(tmp_path_factory):
     base = tmp_path_factory.mktemp("stgnn")
-    write_fake_raw(base / "raw", days=260)
-    prepare(base / "raw", base / "processed", days=240)
+    write_fake_raw(base / "raw", days=420)
+    prepare(base / "raw", base / "processed", days=400)
     build_graph(base / "processed")
     return base / "processed"
 
@@ -93,6 +93,16 @@ def test_model_shapes_and_weekday_index():
     assert out.shape == (2, HORIZON, 5, 3)
     assert (out >= 0).all()
 
+    # Residual mode: before training, the model returns the baseline forecast exactly.
+    res = STGNN(n_nodes=5, n_products=3, hidden=8, residual=True)
+    base = torch.rand(2, HORIZON, 5, 3) * 3
+    out = res(torch.rand(2, LOOKBACK, 5, 3), torch.rand(2, LOOKBACK, 9), torch.rand(2, HORIZON, 9),
+              torch.rand(2, HORIZON, 5, 3), torch.ones(2, HORIZON, 1), torch.eye(5), base)
+    assert torch.allclose(out, base.clamp(min=1e-4), atol=1e-4)
+    with pytest.raises(ValueError):
+        res(torch.rand(2, LOOKBACK, 5, 3), torch.rand(2, LOOKBACK, 9), torch.rand(2, HORIZON, 9),
+            torch.rand(2, HORIZON, 5, 3), torch.ones(2, HORIZON, 1), torch.eye(5))
+
 
 def test_training_end_to_end(dataset_dir):
     pytest.importorskip("torch")
@@ -100,10 +110,19 @@ def test_training_end_to_end(dataset_dir):
     from ml.pipeline import run
 
     run(dataset_dir, train_days=120, verbose=False)
-    report = train(dataset_dir, epochs=2, patience=2, hidden=16, verbose=False)
+    report = train(dataset_dir, epochs=2, patience=2, hidden=16, holdouts=2, verbose=False)
     out = dataset_dir / "results"
 
     assert {"stgnn", "baseline", "naive", "ensemble"} <= set(report["holdout_wape"])
+    assert report["history"][0]["epoch"] == 0  # residual mode logs the baseline's own validation score
+    rolling = pd.read_csv(out / "metrics_rolling.csv")
+    assert set(rolling["holdout_start"]) - {"ALL"} and len(rolling) == 4 * 3  # 2 holdouts + pooled, 4 models
+    assert report["selection_basis"].startswith("pooled over 2")
+    # The latest holdout's baseline in the rolling scores must equal the pipeline's backtest baseline.
+    latest = rolling[rolling["holdout_start"] != "ALL"]["holdout_start"].max()
+    metrics = pd.read_csv(out / "metrics.csv").query("location_id == 'ALL'").set_index("model")
+    rb = rolling[(rolling["holdout_start"] == latest) & (rolling["model"] == "baseline")]["wape"].iloc[0]
+    assert rb == pytest.approx(metrics.at["baseline", "wape"], abs=1e-3)
     assert report["recommendation_model"] in {"baseline", "stgnn", "ensemble"}
     assert 0 < report["holdout_wape"]["stgnn"] < 2
     fc = pd.read_csv(out / "forecasts_stgnn.csv")

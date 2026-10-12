@@ -64,12 +64,14 @@ together. The model is an A3T-GCN, written directly in PyTorch:
 1. **Encoder:** a graph-convolutional GRU reads the last 56 days. Each day, every store updates its
    state from its own sales, the calendar, and its neighbours' states.
 2. **Attention** over those 56 days picks out the ones that matter most.
-3. **Decoder:** for each of the next 28 days, it starts from a same-weekday estimate and learns a
-   correction from the store's state, the known calendar and the network context.
+3. **Decoder:** for each of the next 28 days, it starts from the gradient-boosted baseline's
+   forecast and learns a correction from the store's state, last year's sales, the known calendar
+   and the network context. Untrained, it reproduces the baseline exactly; training only has to
+   learn what the store network adds. The baseline forecasts it learns from are out-of-sample
+   (refit every 8 weeks), so it never sees a forecast that already knew the answer.
 
-It is scored on the same 28-day holdout as a gradient-boosted baseline and a seasonal-naive
-benchmark, alongside a fixed 50/50 blend of the ST-GNN and the baseline. Whichever has the
-lowest holdout error drives the recommendations.
+All models (ST-GNN, baseline, a fixed 50/50 blend, seasonal naive) are scored on four
+back-to-back 28-day holdouts. Whichever has the lowest pooled error drives the recommendations.
 
 ## Data transparency
 

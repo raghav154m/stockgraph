@@ -20,7 +20,8 @@ ml/data/       raw Favorita -> template CSVs (prepare.py), Telangana places, pro
 ml/graph/      store graph (nodes.csv, edges.csv)
 ml/data/load.py   loads any template dataset into a complete daily panel (fills closed days)
 ml/models/     baseline.py: direct 28-day gradient-boosted model + seasonal naive
-ml/models/stgnn/  data.py (numpy windows, adjacency), model.py (T-GCN cell + attention + decoder), train.py
+ml/models/stgnn/  data.py (numpy windows, adjacency), model.py (T-GCN cell + attention + decoder, residual mode),
+                  evaluate.py (rolling holdouts, out-of-sample baseline cubes, scoring), train.py
 ml/models/ensemble.py  50/50 blend of baseline + ST-GNN; picks the model for recommendations (no torch needed)
 ml/inventory/  optimizer.py: lead times, safety stock, reorder points, status, transfers, reorders
 ml/pipeline.py   one command: backtest -> forecast -> optimize -> data/processed/results/
@@ -52,7 +53,8 @@ IDs: stores `ST-01`..`ST-54`, warehouses `WH-SHM`, `WH-MDC`, `WH-WGL`, products 
 - forecasts_stgnn.csv: same columns as forecasts.csv, model = stgnn (from ml.models.stgnn.train)
 - backtest.csv gains a `stgnn` column and metrics.csv `stgnn` rows after ST-GNN training
 - forecasts_ensemble.csv: 50/50 blend; backtest.csv `ensemble` column, metrics.csv `ensemble` rows
-- stgnn_training.json: settings, per-epoch loss and validation WAPE, holdout WAPE per model, chosen model
+- metrics_rolling.csv: holdout_start (date or ALL), model, mae, wape, bias over 4 back-to-back 28-day holdouts
+- stgnn_training.json: settings, per-epoch loss and validation WAPE, rolling and latest-holdout WAPE, chosen model
 - summary.json: headline numbers for the dashboard; `forecast_model` says which model drove recommendations
 
 ## Conventions

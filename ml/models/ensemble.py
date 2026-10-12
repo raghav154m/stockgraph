@@ -81,10 +81,20 @@ def blend(data_dir: Path = DEFAULT_DATA, model_for_recommendations: str = "auto"
     metrics.to_csv(out / "metrics.csv", index=False)
 
     # ---- which model drives recommendations ----
-    best = min(MODELS, key=lambda m: wape[m])
+    # Prefer the error pooled over several holdouts (metrics_rolling.csv) when ST-GNN training wrote it.
+    rolling_path = out / "metrics_rolling.csv"
+    if rolling_path.exists():
+        rolling = pd.read_csv(rolling_path)
+        selection = rolling[rolling["holdout_start"] == "ALL"].set_index("model")["wape"].astype(float)
+        basis = f"pooled over {rolling['holdout_start'].nunique() - 1} holdouts"
+    else:
+        selection, basis = wape, "latest holdout"
+    best = min(MODELS, key=lambda m: selection[m])
     chosen = best if model_for_recommendations == "auto" else model_for_recommendations
-    log("Holdout WAPE  " + "   ".join(f"{m} {wape[m]:.1%}" for m in (*MODELS, "naive")))
-    log(f"Recommendations use: {chosen}" + (" (lowest holdout error)" if model_for_recommendations == "auto" else ""))
+    log("Latest holdout WAPE  " + "   ".join(f"{m} {wape[m]:.1%}" for m in (*MODELS, "naive")))
+    if rolling_path.exists():
+        log(f"WAPE {basis}  " + "   ".join(f"{m} {selection[m]:.1%}" for m in (*MODELS, "naive")))
+    log(f"Recommendations use: {chosen}" + (f" (lowest error, {basis})" if model_for_recommendations == "auto" else ""))
 
     from ml.pipeline import optimize  # local import avoids a circular import at module load
     summary = optimize(ds, pd.read_csv(out / _forecast_file(chosen), parse_dates=["date"]), out, metrics, chosen)
@@ -93,9 +103,11 @@ def blend(data_dir: Path = DEFAULT_DATA, model_for_recommendations: str = "auto"
     result = {
         "holdout_wape": {m: round(float(w), 4) for m, w in wape.items()},
         "ensemble_weight_stgnn": weight,
+        "selection_wape": {m: round(float(selection[m]), 4) for m in selection.index},
+        "selection_basis": basis,
         "best_model": best,
         "recommendation_model": chosen,
-        "note": "Models are compared on one 28-day holdout; the blend weight is fixed, not tuned on it.",
+        "note": "The blend weight is fixed at 50/50, not tuned on the holdouts.",
     }
     training = out / "stgnn_training.json"
     if training.exists():

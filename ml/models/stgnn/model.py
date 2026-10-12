@@ -11,6 +11,11 @@ How it reads the data, per forecast:
      same-weekday "seasonal naive" estimate and the same weekday last year, and outputs
      all product families at once.
 
+Residual mode (the default in training): the decoder also receives the gradient-boosted
+baseline's forecast for each day and is anchored on it. With the output layer initialised to
+zero, an untrained model reproduces the baseline exactly, so training only has to learn where
+the store network and recent dynamics say the baseline is wrong.
+
 Outputs are in each series' own scale (sales / average daily sales), always >= 0.
 
 Reference: Bai et al., "A3T-GCN: Attention Temporal Graph Convolutional Network for
@@ -68,25 +73,32 @@ def same_weekday_index() -> np.ndarray:
 
 class STGNN(nn.Module):
     def __init__(self, n_nodes: int, n_products: int, hidden: int = 64, node_dim: int = 8,
-                 step_dim: int = 8, head_dim: int = 128, dropout: float = 0.1):
+                 step_dim: int = 8, head_dim: int = 128, dropout: float = 0.1, residual: bool = False):
         super().__init__()
         self.hidden = hidden
+        self.residual = residual
         self.node_emb = nn.Embedding(n_nodes, node_dim)
         self.cell = TGCNCell(n_products + CAL_FEATURES + node_dim, hidden)
         self.attn = nn.Sequential(nn.Linear(hidden, hidden), nn.Tanh(), nn.Linear(hidden, 1))
         self.step_emb = nn.Embedding(HORIZON, step_dim)
         self.head = nn.Sequential(
-            nn.Linear(2 * hidden + CAL_FEATURES + step_dim + 2 * n_products + 1, head_dim),
+            nn.Linear(2 * hidden + CAL_FEATURES + step_dim + (3 if residual else 2) * n_products + 1, head_dim),
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.Linear(head_dim, n_products),
         )
+        if residual:  # start as an exact copy of the baseline; training learns the corrections
+            nn.init.zeros_(self.head[-1].weight)
+            nn.init.zeros_(self.head[-1].bias)
         self.register_buffer("weekday_idx", torch.from_numpy(same_weekday_index()), persistent=False)
 
     def forward(self, x_sales: torch.Tensor, x_cal: torch.Tensor, f_cal: torch.Tensor,
-                f_ly: torch.Tensor, f_ly_ok: torch.Tensor, adj: torch.Tensor) -> torch.Tensor:
+                f_ly: torch.Tensor, f_ly_ok: torch.Tensor, adj: torch.Tensor,
+                f_base: torch.Tensor | None = None) -> torch.Tensor:
         """x_sales [B, L, N, P], x_cal [B, L, C], f_cal [B, H, C], f_ly [B, H, N, P],
-        f_ly_ok [B, H, 1], adj [N, N] -> [B, H, N, P]."""
+        f_ly_ok [B, H, 1], adj [N, N], f_base [B, H, N, P] (residual mode) -> [B, H, N, P]."""
+        if self.residual and f_base is None:
+            raise ValueError("Residual model needs the baseline forecast (f_base)")
         b, steps, n, _ = x_sales.shape
         emb = self.node_emb.weight.unsqueeze(0).expand(b, n, -1)
         h = x_sales.new_zeros(b, n, self.hidden)
@@ -109,6 +121,12 @@ class STGNN(nn.Module):
             naive,
             f_ly,
             f_ly_ok.unsqueeze(2).expand(b, hor, n, -1),
+            *([f_base] if self.residual else []),
         ], dim=-1)
-        # Start from the seasonal-naive estimate and learn a correction on top of it.
-        return F.softplus(self.head(feats) + naive)
+        if self.residual:
+            # softplus(inverse_softplus(base) + correction): a zero correction returns the baseline exactly.
+            base = f_base.clamp(min=1e-4)
+            anchor = base + torch.log(-torch.expm1(-base))
+        else:
+            anchor = naive  # standalone: start from the same-weekday estimate
+        return F.softplus(self.head(feats) + anchor)

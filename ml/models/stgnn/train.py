@@ -1,27 +1,32 @@
-"""Train the ST-GNN, compare it with the baseline, and (if it wins) use it for recommendations.
+"""Train the ST-GNN, compare it with the baseline on several holdouts, pick the model for recommendations.
 
 Run the baseline pipeline first; this script adds to its results:
 
   python -m ml.pipeline              # baseline: writes data/processed/results/
-  python -m ml.models.stgnn.train    # ST-GNN: trains on CPU in a few minutes
+  python -m ml.models.stgnn.train    # ST-GNN: about 15 minutes on a laptop CPU
 
 Steps:
-  1. Backtest: pick the number of epochs by early stopping on the 8 most recent weekly windows
-     before the holdout, retrain on every window up to the holdout for that many epochs (as the
-     baseline does), then forecast the held-out 28 days and score it like the baseline.
-  2. Final model: retrain on all data for the same number of epochs, forecast the next 28 days.
-  3. Blend it 50/50 with the baseline (ml.models.ensemble), score all models on the holdout,
-     and re-run the optimizer with whichever has the lowest holdout error.
+  1. Out-of-sample baseline forecasts: the baseline is refit at each holdout and (in residual
+     mode) every 8 weeks before them, so the ST-GNN never learns from a baseline forecast that
+     had already seen the answer. Cached in baseline_oof.npz, so re-runs skip this step.
+  2. Pick the number of epochs by early stopping on the 8 weekly windows before the first holdout.
+  3. Rolling evaluation: for each of `holdouts` back-to-back 28-day holdouts, retrain on every
+     window before it, forecast it, and score ST-GNN, baseline, 50/50 blend and naive.
+  4. Final model on all data, forecasting the next 28 days.
+  5. Blend with the baseline (ml.models.ensemble) and re-run the optimizer with whichever model
+     has the lowest error pooled over all holdouts.
 
-Adds to results/: forecasts_stgnn.csv, a `stgnn` column in backtest.csv, `stgnn` rows in
-metrics.csv, forecasts_ensemble.csv, stgnn_training.json (loss curve, settings, holdout
-scores, chosen model), stgnn.pt (weights, gitignored).
+Residual mode (default): the ST-GNN receives the baseline forecast and starts out as an exact
+copy of it, learning only corrections. `--standalone` trains it without the baseline input.
+
+Adds to results/: forecasts_stgnn.csv, forecasts_ensemble.csv, metrics_rolling.csv, `stgnn` and
+`ensemble` columns/rows in backtest.csv and metrics.csv (latest holdout), stgnn_training.json,
+baseline_oof.npz and stgnn.pt (both gitignored data).
 """
 
 from __future__ import annotations
 
 import argparse
-import copy
 import json
 import time
 from pathlib import Path
@@ -34,10 +39,13 @@ from ml.data.load import load_dataset
 from ml.models.baseline import KEYS, Z80, error_metrics, series_sigma
 from ml.models.ensemble import blend
 from ml.models.stgnn.data import HORIZON, LOOKBACK, STData, build, split_origins, windows
+from ml.models.stgnn.evaluate import (BaseForecasts, actual_cube, holdout_origins, naive_cube, oof_start, score,
+                                      valid_mask)
 from ml.models.stgnn.model import STGNN
 
 ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_DATA = ROOT / "data" / "processed"
+REFIT_EVERY = 56  # days between baseline refits for the out-of-sample forecasts
 
 
 def pick_device(name: str) -> torch.device:
@@ -51,20 +59,28 @@ def to_tensors(batch: dict[str, np.ndarray], device: torch.device) -> dict[str, 
 
 
 class Trainer:
-    def __init__(self, data: STData, scale: np.ndarray, device: torch.device, hidden: int, lr: float,
-                 batch_size: int, seed: int):
+    def __init__(self, data: STData, scale: np.ndarray, base: BaseForecasts | None, device: torch.device,
+                 hidden: int, lr: float, batch_size: int, seed: int):
         torch.manual_seed(seed)
-        self.data, self.scale, self.device, self.batch_size = data, scale, device, batch_size
+        self.data, self.scale, self.base, self.device, self.batch_size = data, scale, base, device, batch_size
         self.rng = np.random.default_rng(seed)
         n, p = data.mask.shape
-        self.model = STGNN(n, p, hidden=hidden).to(device)
+        self.model = STGNN(n, p, hidden=hidden, residual=base is not None).to(device)
         self.opt = torch.optim.Adam(self.model.parameters(), lr=lr, weight_decay=1e-5)
         self.adj = torch.from_numpy(data.adjacency).to(device)
         # Loss weight per series ~ its size, so the loss behaves like a Poisson deviance on real units.
         w = data.mask * scale
         self.weight = torch.from_numpy((w / w[data.mask > 0].mean()).astype(np.float32)).to(device)
-        self.mask = torch.from_numpy(data.mask).to(device)
         self.scale_t = torch.from_numpy(scale).to(device)
+
+    def _batch(self, origins: np.ndarray) -> dict[str, torch.Tensor]:
+        b = windows(self.data, origins, self.scale)
+        if self.base is not None:
+            b["f_base"] = self.base.get(origins) / self.scale[None, None]
+        return to_tensors(b, self.device)
+
+    def _forward(self, b: dict[str, torch.Tensor]) -> torch.Tensor:
+        return self.model(b["x_sales"], b["x_cal"], b["f_cal"], b["f_ly"], b["f_ly_ok"], self.adj, b.get("f_base"))
 
     def predict(self, origins: np.ndarray) -> np.ndarray:
         """Forecasts in real units, [B, HORIZON, N, P]."""
@@ -72,27 +88,23 @@ class Trainer:
         out = []
         with torch.no_grad():
             for i in range(0, len(origins), self.batch_size):
-                b = to_tensors(windows(self.data, origins[i:i + self.batch_size], self.scale), self.device)
-                pred = self.model(b["x_sales"], b["x_cal"], b["f_cal"], b["f_ly"], b["f_ly_ok"], self.adj) * self.scale_t
-                out.append(pred.cpu().numpy())
+                b = self._batch(origins[i:i + self.batch_size])
+                out.append((self._forward(b) * self.scale_t).cpu().numpy())
         return np.concatenate(out)
 
     def wape(self, origins: np.ndarray) -> float:
         pred = self.predict(origins)
-        b = windows(self.data, origins, self.scale)
-        actual = b["y"] * self.scale
-        open_days = (b["f_cal"][..., 8] == 0)[:, :, None, None]
-        m = (self.data.mask[None, None] > 0) & open_days
-        return float(np.abs(pred - actual)[np.broadcast_to(m, pred.shape)].sum()
-                     / actual[np.broadcast_to(m, actual.shape)].sum())
+        actual = np.stack([actual_cube(self.data, o) for o in origins])
+        valid = np.stack([valid_mask(self.data, o) for o in origins])
+        return score(pred, actual, valid)["wape"]
 
     def epoch(self, origins: np.ndarray) -> float:
         self.model.train()
         order = self.rng.permutation(origins)
         total, count = 0.0, 0
         for i in range(0, len(order), self.batch_size):
-            b = to_tensors(windows(self.data, order[i:i + self.batch_size], self.scale), self.device)
-            pred = self.model(b["x_sales"], b["x_cal"], b["f_cal"], b["f_ly"], b["f_ly_ok"], self.adj)
+            b = self._batch(order[i:i + self.batch_size])
+            pred = self._forward(b)
             open_days = (1 - b["f_cal"][..., 8])[:, :, None, None]
             w = self.weight[None, None] * open_days
             loss = (w * (pred - b["y"]) ** 2).sum() / w.sum().clamp(min=1e-6)
@@ -103,6 +115,10 @@ class Trainer:
             total += loss.item() * len(b["y"])
             count += len(b["y"])
         return total / count
+
+    def fit(self, origins: np.ndarray, epochs: int) -> None:
+        for _ in range(epochs):
+            self.epoch(origins)
 
 
 def to_frame(data: STData, pred: np.ndarray, origin: int, column: str) -> pd.DataFrame:
@@ -119,7 +135,8 @@ def to_frame(data: STData, pred: np.ndarray, origin: int, column: str) -> pd.Dat
 
 def train(data_dir: Path = DEFAULT_DATA, epochs: int = 40, patience: int = 6, hidden: int = 64,
           lr: float = 1e-3, batch_size: int = 32, seed: int = 42, device: str = "auto",
-          model_for_recommendations: str = "auto", verbose: bool = True) -> dict:
+          model_for_recommendations: str = "auto", holdouts: int = 4, residual: bool = True,
+          verbose: bool = True) -> dict:
     t0 = time.time()
     out_dir = data_dir / "results"
     if not (out_dir / "backtest.csv").exists():
@@ -133,82 +150,111 @@ def train(data_dir: Path = DEFAULT_DATA, epochs: int = 40, patience: int = 6, hi
     ds = load_dataset(data_dir)
     data = build(ds, data_dir / "graph")
     last = data.index_of(ds.as_of)
-    cutoff = last - HORIZON
-    log(f"{len(data.stores)} stores x {len(data.products)} product families, {last + 1} days, device {dev}")
+    holdout_o = holdout_origins(last, holdouts)
+    start = oof_start(last) if residual else LOOKBACK - 1
+    log(f"{len(data.stores)} stores x {len(data.products)} product families, {last + 1} days, device {dev}, "
+        f"ST-GNN {'residual on the baseline' if residual else 'standalone'}, {holdouts} holdout(s)")
 
-    # ---- 1. Backtest model with early stopping ----
-    scale = data.scale(cutoff)
-    train_o, val_o = split_origins(cutoff)
-    log(f"Backtest training: {len(train_o)} windows, validating on {len(val_o)}")
-    trainer = Trainer(data, scale, dev, hidden, lr, batch_size, seed)
-    history, best, best_state, best_epoch, stale = [], np.inf, None, 1, 0
+    # ---- 1. Out-of-sample baseline forecasts ----
+    log("Baseline forecasts (cached after the first run) ...")
+    bounds = holdout_o + [last] + (list(range(start, holdout_o[0], REFIT_EVERY)) if residual else [])
+    oof = BaseForecasts.build(ds, data, bounds, cache=out_dir / "baseline_oof.npz", seed=seed, log=log)
+    base = oof if residual else None  # standalone mode only uses it for scoring
+
+    # ---- 2. Early stopping before the first holdout ----
+    train_o, val_o = split_origins(holdout_o[0], start)
+    log(f"Choosing epochs: {len(train_o)} training windows, {len(val_o)} validation windows")
+    trainer = Trainer(data, data.scale(holdout_o[0]), base, dev, hidden, lr, batch_size, seed)
+    history, best, best_epoch, stale = [], np.inf, 1, 0
+    if residual:
+        start_wape = trainer.wape(val_o)  # an untrained residual model is exactly the baseline
+        history.append({"epoch": 0, "train_loss": None, "val_wape": round(start_wape, 5)})
+        log(f"  epoch  0  (= baseline)    validation WAPE {start_wape:.1%}")
     for ep in range(1, epochs + 1):
         loss = trainer.epoch(train_o)
         val = trainer.wape(val_o)
         history.append({"epoch": ep, "train_loss": round(loss, 5), "val_wape": round(val, 5)})
         log(f"  epoch {ep:>2}  loss {loss:.4f}  validation WAPE {val:.1%}")
         if val < best - 1e-4:
-            best, best_state, best_epoch, stale = val, copy.deepcopy(trainer.model.state_dict()), ep, 0
+            best, best_epoch, stale = val, ep, 0
         else:
             stale += 1
             if stale >= patience:
                 log(f"  stopping: no improvement for {patience} epochs (best epoch {best_epoch})")
                 break
-    del best_state  # only the epoch count is kept; the scored model is refit on all data below
 
-    # Refit on every window up to the holdout so the ST-GNN sees the same recent history as the baseline.
-    bt_o = np.arange(LOOKBACK - 1, cutoff - HORIZON + 1)
-    log(f"Refitting on {len(bt_o)} windows up to the holdout for {best_epoch} epochs ...")
-    refit = Trainer(data, scale, dev, hidden, lr, batch_size, seed)
-    for _ in range(best_epoch):
-        refit.epoch(bt_o)
+    # ---- 3. Rolling evaluation over the holdouts ----
+    rows, pooled = [], {m: ([], []) for m in ("stgnn", "baseline", "ensemble", "naive")}
+    latest_pred = None
+    for i, h in enumerate(holdout_o):
+        log(f"Holdout {i + 1}/{holdouts}: {data.dates[h + 1]:%Y-%m-%d} to {data.dates[h + HORIZON]:%Y-%m-%d}, "
+            f"training {best_epoch} epochs ...")
+        t = Trainer(data, data.scale(h), base, dev, hidden, lr, batch_size, seed)
+        t.fit(np.arange(start, h - HORIZON + 1), best_epoch)
+        stgnn = t.predict(np.array([h]))[0]
+        baseline = oof.get(np.array([h]))[0]
+        preds = {"stgnn": stgnn, "baseline": baseline, "ensemble": 0.5 * (stgnn + baseline),
+                 "naive": naive_cube(ds, data, h)}
+        actual, valid = actual_cube(data, h), valid_mask(data, h)
+        for m, pr in preds.items():
+            rows.append({"holdout_start": f"{data.dates[h + 1]:%Y-%m-%d}", "model": m, **score(pr, actual, valid)})
+            pooled[m][0].append(pr[valid])
+            pooled[m][1].append(actual[valid])
+        log("  WAPE  " + "   ".join(f"{r['model']} {r['wape']:.1%}" for r in rows[-4:]))
+        latest_pred = stgnn
 
-    holdout = to_frame(data, refit.predict(np.array([cutoff]))[0], cutoff, "stgnn")
-    bt = pd.read_csv(out_dir / "backtest.csv", parse_dates=["date"]).drop(columns="stgnn", errors="ignore")
+    for m, (p_list, a_list) in pooled.items():
+        p_all, a_all = np.concatenate(p_list), np.concatenate(a_list)
+        rows.append({"holdout_start": "ALL", "model": m, **score(p_all, a_all, np.ones(len(p_all), dtype=bool))})
+    rolling = pd.DataFrame(rows)
+    rolling.to_csv(out_dir / "metrics_rolling.csv", index=False)
+    overall = rolling[rolling["holdout_start"] == "ALL"].set_index("model")["wape"]
+    log("Pooled over all holdouts  " + "   ".join(f"{m} {w:.1%}" for m, w in overall.items()))
+
+    # Latest holdout -> backtest.csv / metrics.csv, the per-store files the app reads.
+    cutoff = holdout_o[-1]
+    holdout = to_frame(data, latest_pred, cutoff, "stgnn")
+    bt = pd.read_csv(out_dir / "backtest.csv", parse_dates=["date"]).drop(columns=["stgnn", "ensemble"], errors="ignore")
     bt = bt.merge(holdout, on=KEYS + ["date"], how="left")
     closed_dates = set(data.dates[data.calendar[:, 8] == 1])
     scored = bt[~bt["date"].isin(closed_dates)]
-
     metrics = pd.read_csv(out_dir / "metrics.csv")
-    metrics = metrics[metrics["model"] != "stgnn"]
-    rows = [{"model": "stgnn", "location_id": "ALL", **error_metrics(scored["actual"], scored["stgnn"])}]
-    rows += [{"model": "stgnn", "location_id": loc, **error_metrics(g["actual"], g["stgnn"])}
-             for loc, g in scored.groupby("location_id")]
-    metrics = pd.concat([metrics, pd.DataFrame(rows)], ignore_index=True)
-    wape = metrics[metrics["location_id"] == "ALL"].set_index("model")["wape"]
-    log(f"Holdout WAPE  stgnn {wape['stgnn']:.1%}   baseline {wape['baseline']:.1%}   naive {wape['naive']:.1%}")
+    metrics = metrics[~metrics["model"].isin(["stgnn", "ensemble"])]
+    new = [{"model": "stgnn", "location_id": "ALL", **error_metrics(scored["actual"], scored["stgnn"])}]
+    new += [{"model": "stgnn", "location_id": loc, **error_metrics(g["actual"], g["stgnn"])}
+            for loc, g in scored.groupby("location_id")]
+    metrics = pd.concat([metrics, pd.DataFrame(new)], ignore_index=True)
 
-    # ---- 2. Final model on all data for the chosen number of epochs ----
-    scale_f = data.scale(last)
-    all_o = np.arange(LOOKBACK - 1, last - HORIZON + 1)
-    log(f"Final training on {len(all_o)} windows for {best_epoch} epochs ...")
-    final = Trainer(data, scale_f, dev, hidden, lr, batch_size, seed)
-    for _ in range(best_epoch):
-        final.epoch(all_o)
+    # ---- 4. Final model on all data ----
+    final_o = np.arange(start, last - HORIZON + 1)
+    log(f"Final training on {len(final_o)} windows for {best_epoch} epochs ...")
+    final = Trainer(data, data.scale(last), base, dev, hidden, lr, batch_size, seed)
+    final.fit(final_o, best_epoch)
     fc = to_frame(data, final.predict(np.array([last]))[0], last, "p50")
-    fc = fc.merge(series_sigma(bt.dropna(subset=["stgnn"]), "stgnn"), on=KEYS, how="left")
+    fc = fc.merge(series_sigma(scored.dropna(subset=["stgnn"]), "stgnn"), on=KEYS, how="left")
     fc["sigma"] = fc["sigma"].fillna(fc["p50"] * 0.5)
     fc["p10"] = np.clip(fc["p50"] - Z80 * fc["sigma"], 0, None)
     fc["p90"] = fc["p50"] + Z80 * fc["sigma"]
     fc["model"] = "stgnn"
     fc = fc[KEYS + ["date", "model", "p50", "p10", "p90", "sigma"]].round({"p50": 3, "p10": 3, "p90": 3, "sigma": 3})
 
-    # ---- write ----
     fc.assign(date=fc["date"].dt.strftime("%Y-%m-%d")).to_csv(out_dir / "forecasts_stgnn.csv", index=False)
     bt.assign(date=bt["date"].dt.strftime("%Y-%m-%d")).round(3).to_csv(out_dir / "backtest.csv", index=False)
     metrics.to_csv(out_dir / "metrics.csv", index=False)
     torch.save(final.model.state_dict(), out_dir / "stgnn.pt")
 
     report = {
-        "settings": {"lookback": LOOKBACK, "horizon": HORIZON, "hidden": hidden, "lr": lr,
-                     "batch_size": batch_size, "seed": seed, "max_epochs": epochs, "patience": patience},
+        "settings": {"mode": "residual" if residual else "standalone", "lookback": LOOKBACK, "horizon": HORIZON,
+                     "hidden": hidden, "lr": lr, "batch_size": batch_size, "seed": seed,
+                     "max_epochs": epochs, "patience": patience, "holdouts": holdouts},
         "best_epoch": best_epoch,
         "history": history,
+        "rolling_wape": {m: float(w) for m, w in overall.items()},
         "train_seconds": round(time.time() - t0, 1),
     }
     (out_dir / "stgnn_training.json").write_text(json.dumps(report, indent=2))
 
-    # Blend with the baseline, score everything on the holdout, pick the model for recommendations.
+    # ---- 5. Blend, choose, optimize ----
     report.update(blend(data_dir, model_for_recommendations, verbose=verbose))
     log(f"Done in {time.time() - t0:.0f}s. Results in {out_dir}")
     return report
@@ -224,12 +270,14 @@ def main() -> None:
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", default="auto", help="auto, cpu, cuda or mps")
+    parser.add_argument("--holdouts", type=int, default=4, help="back-to-back 28-day holdouts to score on")
+    parser.add_argument("--standalone", action="store_true", help="train without the baseline input")
     parser.add_argument("--model-for-recommendations", choices=["auto", "baseline", "stgnn", "ensemble"],
-                        default="auto", help="auto = lowest holdout error")
+                        default="auto", help="auto = lowest error pooled over the holdouts")
     args = parser.parse_args()
-    report = train(args.data, args.epochs, args.patience, args.hidden, args.lr, args.batch_size,
-                   args.seed, args.device, args.model_for_recommendations)
-    print(json.dumps({k: report[k] for k in ("best_epoch", "holdout_wape", "best_model",
+    report = train(args.data, args.epochs, args.patience, args.hidden, args.lr, args.batch_size, args.seed,
+                   args.device, args.model_for_recommendations, args.holdouts, not args.standalone)
+    print(json.dumps({k: report[k] for k in ("best_epoch", "rolling_wape", "holdout_wape", "best_model",
                                              "recommendation_model", "train_seconds")}, indent=2))
 
 

@@ -126,16 +126,17 @@ def windows(data: STData, origins: np.ndarray, scale: np.ndarray) -> dict[str, n
     }
 
 
-def split_origins(last_known: int, val_windows: int = 8, stride: int = 1) -> tuple[np.ndarray, np.ndarray]:
+def split_origins(last_known: int, start: int = LOOKBACK - 1, val_windows: int = 8,
+                  stride: int = 1) -> tuple[np.ndarray, np.ndarray]:
     """Training and validation forecast origins whose targets end on or before `last_known`.
 
-    Validation = the most recent `val_windows` weekly origins; training = every earlier origin
-    whose targets don't overlap the validation targets.
+    Validation = the most recent `val_windows` weekly origins; training = every origin from
+    `start` whose targets don't overlap the validation targets.
     """
     latest = last_known - HORIZON                         # last origin with a full 28-day target
     val = latest - 7 * np.arange(val_windows)[::-1]
     train_end = val.min() - HORIZON                       # training targets stop before validation starts
-    train = np.arange(LOOKBACK - 1, train_end + 1, stride)
+    train = np.arange(max(start, LOOKBACK - 1), train_end + 1, stride)
     if len(train) < 50:
         raise ValueError(f"Only {len(train)} training windows; need more history")
     return train, val
