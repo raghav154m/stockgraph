@@ -1,0 +1,9 @@
+[project]
+name = "stockgraph"
+version = "0.1.0"
+description = "AI-driven inventory optimization for multi-location retail, powered by an ST-GNN"
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

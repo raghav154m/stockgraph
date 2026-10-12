@@ -1,0 +1,29 @@
+# --- data and model artifacts (never commit) ---
+/data/
+*.csv
+*.parquet
+*.pt
+*.pkl
+*.db
+*.zip
+
+# --- secrets ---
+.env
+kaggle.json
+
+# --- Python ---
+__pycache__/
+*.pyc
+.venv/
+venv/
+.ipynb_checkpoints/
+.pytest_cache/
+
+# --- frontend ---
+node_modules/
+dist/
+
+# --- editors / OS ---
+.vscode/
+.idea/
+.DS_Store
